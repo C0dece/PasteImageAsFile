@@ -1,0 +1,86 @@
+<p align="center">
+  <img src="assets/app_icon.png" width="128" alt="PasteImageAsFile">
+</p>
+
+<h1 align="center">PasteImageAsFile</h1>
+
+<p align="center">
+  <b>Вставляй картинки из буфера обмена прямо в Проводник или на Рабочий стол</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/C0dece/PasteImageAsFile/releases/latest">
+    <img src="https://img.shields.io/github/v/release/C0dece/PasteImageAsFile?style=flat-square&color=blue" alt="Release">
+  </a>
+  <img src="https://img.shields.io/badge/platform-Windows-0078d4?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/.NET_Framework-4.0-512BD4?style=flat-square" alt=".NET">
+  <img src="https://img.shields.io/github/license/C0dece/PasteImageAsFile?style=flat-square" alt="License">
+  <img src="https://img.shields.io/github/size/C0dece/PasteImageAsFile/dist/PasteImageAsFile.exe?style=flat-square&label=exe%20size" alt="EXE size">
+</p>
+
+---
+
+## Что это?
+
+Маленькая утилита для Windows, которая добавляет возможность вставлять скопированные изображения как файлы.
+
+Скопировал картинку в браузере или сделал скриншот - нажал **Ctrl+V** в папке или на рабочем столе - получил файл. Все.
+
+## Возможности
+
+- **Ctrl+V в Проводнике** - вставка изображений из буфера как `.png` файлов
+- **Ctrl+V на Рабочем столе** - файл появляется под курсором мыши
+- **Контекстное меню** - пункт "Вставить изображение из буфера" в ПКМ
+- **Умное имя файла** - извлекает оригинальное имя картинки из браузера
+- **Автозапуск** - работает в фоне, иконка в трее
+- **Легковесность** - один .exe файл (~30 КБ), без зависимостей
+
+## Установка
+
+1. Скачай `PasteImageAsFile.exe` из [Releases](https://github.com/C0dece/PasteImageAsFile/releases/latest)
+2. Запусти - откроется окно управления
+3. Нажми **"Установить"** для интеграции с системой
+
+Или через командную строку:
+```
+PasteImageAsFile.exe --install
+```
+
+## Удаление
+
+В окне утилиты нажми **"Удалить из системы"**.
+
+Или через командную строку:
+```
+PasteImageAsFile.exe --uninstall
+```
+
+## Как это работает
+
+Утилита работает в фоне и слушает буфер обмена. Когда ты копируешь картинку (скриншот, из браузера, из редактора), она автоматически добавляет к данным буфера формат `FileDropList` - это тот формат, который Windows использует при копировании файлов.
+
+После этого стандартная вставка Ctrl+V в Проводнике или на Рабочем столе создает PNG-файл.
+
+## Параметры запуска
+
+| Параметр | Описание |
+|----------|----------|
+| *(без параметров)* | Открыть окно управления |
+| `--daemon` / `-d` | Фоновый режим (иконка в трее) |
+| `--install` / `-i` | Установить в систему |
+| `--uninstall` / `-u` | Удалить из системы |
+| `--save <путь>` / `-s` | Сохранить картинку из буфера в указанную папку |
+
+## Сборка из исходников
+
+Для сборки нужен только встроенный компилятор .NET Framework:
+
+```
+build.bat
+```
+
+Готовый файл появится в `dist/PasteImageAsFile.exe`.
+
+## Лицензия
+
+[MIT](LICENSE)

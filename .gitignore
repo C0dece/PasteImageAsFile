@@ -1,0 +1,9 @@
+bin/
+obj/
+*.log
+.vs/
+*.user
+*.suo
+*.exe
+!dist/PasteImageAsFile.exe
+!dist/app.ico
