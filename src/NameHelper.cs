@@ -13,11 +13,22 @@ namespace PasteImageAsFile
         [DllImport("user32.dll")]
         static extern IntPtr GetForegroundWindow();
 
+        [DllImport("user32.dll")]
+        static extern IntPtr WindowFromPoint(DesktopHelper.POINT Point);
+
+        [DllImport("user32.dll", ExactSpelling = true)]
+        static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
         [DllImport("user32.dll", SetLastError = true)]
         static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        const uint GA_ROOT = 2;
 
         public static string SanitizeFileName(string name)
         {
@@ -149,12 +160,55 @@ namespace PasteImageAsFile
             return null;
         }
 
+        private static bool IsValidTargetWindow(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return false;
+            try
+            {
+                StringBuilder sb = new StringBuilder(64);
+                GetClassName(hwnd, sb, 64);
+                string cls = sb.ToString();
+                if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd")
+                {
+                    return false;
+                }
+                return true;
+            }
+            catch { return false; }
+        }
+
         public static string GetActiveWindowTitle()
         {
             try
             {
-                IntPtr hwnd = GetForegroundWindow();
-                if (hwnd == IntPtr.Zero) return null;
+                IntPtr hwnd = IntPtr.Zero;
+
+                // 1. Приоритет: окно непосредственно под курсором мыши (на активном мониторе)
+                DesktopHelper.POINT pt;
+                if (DesktopHelper.TryGetCursorPosition(out pt))
+                {
+                    IntPtr underCursor = WindowFromPoint(pt);
+                    if (underCursor != IntPtr.Zero)
+                    {
+                        IntPtr root = GetAncestor(underCursor, GA_ROOT);
+                        if (root != IntPtr.Zero && IsValidTargetWindow(root))
+                        {
+                            hwnd = root;
+                        }
+                        else if (IsValidTargetWindow(underCursor))
+                        {
+                            hwnd = underCursor;
+                        }
+                    }
+                }
+
+                // 2. Если под курсором десктоп или панель задач, берем текущее активное окно
+                if (hwnd == IntPtr.Zero)
+                {
+                    hwnd = GetForegroundWindow();
+                }
+
+                if (hwnd == IntPtr.Zero || !IsValidTargetWindow(hwnd)) return null;
 
                 uint pid;
                 GetWindowThreadProcessId(hwnd, out pid);
@@ -167,11 +221,11 @@ namespace PasteImageAsFile
 
                 if (!string.IsNullOrEmpty(title))
                 {
-                    // Убираем суффиксы браузеров
+                    // Убираем суффиксы браузеров и популярных приложений
                     string[] suffixes = new string[] {
                         " - Google Chrome", " - Microsoft Edge", " - Mozilla Firefox",
                         " - Opera", " - Yandex", " - Brave", " - Visual Studio Code",
-                        " - Telegram", " - Discord"
+                        " - Visual Studio", " - Telegram", " - Discord", " - Figma", " - Photoshop"
                     };
 
                     foreach (var s in suffixes)

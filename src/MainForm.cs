@@ -37,6 +37,8 @@ namespace PasteImageAsFile
         private CheckBox chkAutoRun;
         private CheckBox chkContextMenu;
         private CheckBox chkShowHistoryMenu;
+        private CheckBox chkTrayClickOpensClipboard;
+        private CheckBox chkClassicContextMenuWin11;
         private CheckBox chkPlaceUnderCursor;
         private CheckBox chkExtractOriginalName;
         private Label lblPrefix;
@@ -65,9 +67,9 @@ namespace PasteImageAsFile
             this.SuspendLayout();
 
             this.Text = "PasteImageAsFile";
-            this.Size = new Size(500, 605);
-            this.MinimumSize = new Size(500, 605);
-            this.MaximumSize = new Size(500, 605);
+            this.Size = new Size(500, 645);
+            this.MinimumSize = new Size(500, 645);
+            this.MaximumSize = new Size(500, 645);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
@@ -166,7 +168,7 @@ namespace PasteImageAsFile
             pnlCardInstall.Controls.Add(btnUninstall);
 
             // --- Settings Card ---
-            pnlCardSettings = CreateCard(20, 262, 444, 232);
+            pnlCardSettings = CreateCard(20, 262, 444, 280);
 
             Label lblSettingsTitle = new Label();
             lblSettingsTitle.Text = "Настройки";
@@ -176,7 +178,7 @@ namespace PasteImageAsFile
             lblSettingsTitle.Location = new Point(18, 10);
 
             int chkTop = 34;
-            int chkStep = 27;
+            int chkStep = 26;
 
             chkAutoRun = CreateCheckBox("Автозапуск вместе со стартом Windows", 18, chkTop);
             chkAutoRun.CheckedChanged += (s, e) => { Config.AutoRun = chkAutoRun.Checked; ShellIntegration.SetAutoRun(chkAutoRun.Checked); };
@@ -194,21 +196,32 @@ namespace PasteImageAsFile
                 ShellIntegration.SetHistoryMenuItem(chkShowHistoryMenu.Checked);
             };
 
-            chkPlaceUnderCursor = CreateCheckBox("Размещать файл под курсором на Рабочем столе", 18, chkTop + chkStep * 3);
+            chkTrayClickOpensClipboard = CreateCheckBox("Клик левой кнопкой по трею открывает буфер обмена", 18, chkTop + chkStep * 3);
+            chkTrayClickOpensClipboard.CheckedChanged += (s, e) => {
+                Config.TrayClickOpensClipboard = chkTrayClickOpensClipboard.Checked;
+            };
+
+            chkClassicContextMenuWin11 = CreateCheckBox("Классическое контекстное меню Windows 11", 18, chkTop + chkStep * 4);
+            chkClassicContextMenuWin11.CheckedChanged += (s, e) => {
+                Config.ClassicContextMenuWin11 = chkClassicContextMenuWin11.Checked;
+                ShellIntegration.SetClassicContextMenuWin11(chkClassicContextMenuWin11.Checked);
+            };
+
+            chkPlaceUnderCursor = CreateCheckBox("Размещать файл под курсором на Рабочем столе", 18, chkTop + chkStep * 5);
             chkPlaceUnderCursor.CheckedChanged += (s, e) => { Config.PlaceUnderCursor = chkPlaceUnderCursor.Checked; };
 
-            chkExtractOriginalName = CreateCheckBox("Извлекать имя картинки везде где возможно", 18, chkTop + chkStep * 4);
+            chkExtractOriginalName = CreateCheckBox("Извлекать имя картинки везде где возможно", 18, chkTop + chkStep * 6);
             chkExtractOriginalName.CheckedChanged += (s, e) => { Config.ExtractOriginalName = chkExtractOriginalName.Checked; };
 
             lblPrefix = new Label();
             lblPrefix.Text = "Префикс по умолчанию:";
             lblPrefix.ForeColor = TextSecondary;
             lblPrefix.AutoSize = true;
-            lblPrefix.Location = new Point(18, chkTop + chkStep * 5 + 6);
+            lblPrefix.Location = new Point(18, chkTop + chkStep * 7 + 4);
 
             txtPrefix = new TextBox();
-            txtPrefix.Location = new Point(195, chkTop + chkStep * 5 + 3);
-            txtPrefix.Size = new Size(160, 26);
+            txtPrefix.Location = new Point(195, chkTop + chkStep * 7 + 1);
+            txtPrefix.Size = new Size(160, 24);
             txtPrefix.BorderStyle = BorderStyle.FixedSingle;
             txtPrefix.Font = new Font("Segoe UI", 9.5f);
             txtPrefix.TextChanged += (s, e) => { Config.DefaultPrefix = txtPrefix.Text.Trim(); };
@@ -217,6 +230,8 @@ namespace PasteImageAsFile
             pnlCardSettings.Controls.Add(chkAutoRun);
             pnlCardSettings.Controls.Add(chkContextMenu);
             pnlCardSettings.Controls.Add(chkShowHistoryMenu);
+            pnlCardSettings.Controls.Add(chkTrayClickOpensClipboard);
+            pnlCardSettings.Controls.Add(chkClassicContextMenuWin11);
             pnlCardSettings.Controls.Add(chkPlaceUnderCursor);
             pnlCardSettings.Controls.Add(chkExtractOriginalName);
             pnlCardSettings.Controls.Add(lblPrefix);
@@ -224,7 +239,7 @@ namespace PasteImageAsFile
 
             // --- Footer ---
             pnlFooter = new Panel();
-            pnlFooter.Location = new Point(20, 508);
+            pnlFooter.Location = new Point(20, 552);
             pnlFooter.Size = new Size(444, 40);
             pnlFooter.BackColor = Color.Transparent;
 
@@ -332,6 +347,8 @@ namespace PasteImageAsFile
             chkContextMenu.Checked = Config.ContextMenu;
             chkShowHistoryMenu.Checked = Config.ShowHistoryMenu;
             chkShowHistoryMenu.Enabled = Config.ContextMenu;
+            chkTrayClickOpensClipboard.Checked = Config.TrayClickOpensClipboard;
+            chkClassicContextMenuWin11.Checked = Config.ClassicContextMenuWin11 || ShellIntegration.IsClassicContextMenuWin11Enabled();
             chkPlaceUnderCursor.Checked = Config.PlaceUnderCursor;
             chkExtractOriginalName.Checked = Config.ExtractOriginalName;
             txtPrefix.Text = Config.DefaultPrefix;

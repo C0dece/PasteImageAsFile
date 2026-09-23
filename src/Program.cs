@@ -322,6 +322,19 @@ namespace PasteImageAsFile
                 Visible = true
             };
 
+            trayIcon.MouseClick += (s, e) => {
+                if (e.Button == MouseButtons.Left)
+                {
+                    if (Config.TrayClickOpensClipboard)
+                    {
+                        ShowClipboardHistory();
+                    }
+                    else
+                    {
+                        ShowMainForm();
+                    }
+                }
+            };
             trayIcon.DoubleClick += (s, e) => ShowMainForm();
             Logger.Log("InitTray complete, trayIcon visible: " + trayIcon.Visible);
         }

@@ -37,6 +37,18 @@ namespace PasteImageAsFile
             set { SetDword("ShowHistoryMenu", value ? 1 : 0); }
         }
 
+        public static bool TrayClickOpensClipboard
+        {
+            get { return GetDword("TrayClickOpensClipboard", 1) == 1; }
+            set { SetDword("TrayClickOpensClipboard", value ? 1 : 0); }
+        }
+
+        public static bool ClassicContextMenuWin11
+        {
+            get { return GetDword("ClassicContextMenuWin11", 0) == 1; }
+            set { SetDword("ClassicContextMenuWin11", value ? 1 : 0); }
+        }
+
         public static string DefaultPrefix
         {
             get { return GetString("DefaultPrefix", "Снимок"); }

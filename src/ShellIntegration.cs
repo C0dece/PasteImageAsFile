@@ -12,7 +12,7 @@ namespace PasteImageAsFile
         public const string AppName = "PasteImageAsFile";
         public const string MenuText = "Вставить изображение из буфера";
         public const string HistoryMenuText = "Буфер обмена";
-        public const string AppVersion = "1.3.0";
+        public const string AppVersion = "1.4.0";
 
         [DllImport("shell32.dll")]
         public static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
@@ -128,13 +128,21 @@ namespace PasteImageAsFile
             RefreshShellIcons();
         }
 
+        private static readonly string[] MenuLocations = new string[]
+        {
+            @"Software\Classes\Directory\Background\shell",
+            @"Software\Classes\DesktopBackground\shell",
+            @"Software\Classes\Drive\Background\shell"
+        };
+
         public static void SetImagePasteMenuItem(bool visible)
         {
             if (!Config.ContextMenu)
             {
-                // Если общая настройка меню выключена, пункт должен быть удален
-                try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\Directory\Background\shell\PasteImageAsFile", false); } catch {}
-                try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\DesktopBackground\shell\PasteImageAsFile", false); } catch {}
+                foreach (var loc in MenuLocations)
+                {
+                    try { Registry.CurrentUser.DeleteSubKeyTree(loc + @"\PasteImageAsFile", false); } catch {}
+                }
                 return;
             }
 
@@ -142,76 +150,57 @@ namespace PasteImageAsFile
             string quotedExe = "\"" + exePath + "\"";
             string iconRef = "\"" + exePath + "\",0";
 
-            if (visible)
+            foreach (var loc in MenuLocations)
             {
-                using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\Directory\Background\shell\PasteImageAsFile"))
+                string keyPath = loc + @"\PasteImageAsFile";
+                if (visible)
                 {
-                    if (key != null)
+                    using (var key = Registry.CurrentUser.CreateSubKey(keyPath))
                     {
-                        key.SetValue("", MenuText);
-                        key.SetValue("Icon", iconRef);
-                        using (var cmd = key.CreateSubKey("command"))
+                        if (key != null)
                         {
-                            if (cmd != null) cmd.SetValue("", quotedExe + " --save \"%V\"");
+                            key.SetValue("", MenuText);
+                            key.SetValue("Icon", iconRef);
+                            using (var cmd = key.CreateSubKey("command"))
+                            {
+                                if (cmd != null) cmd.SetValue("", quotedExe + " --save \"%V\"");
+                            }
                         }
                     }
                 }
-
-                using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\DesktopBackground\shell\PasteImageAsFile"))
+                else
                 {
-                    if (key != null)
-                    {
-                        key.SetValue("", MenuText);
-                        key.SetValue("Icon", iconRef);
-                        using (var cmd = key.CreateSubKey("command"))
-                        {
-                            if (cmd != null) cmd.SetValue("", quotedExe + " --save \"%V\"");
-                        }
-                    }
+                    try { Registry.CurrentUser.DeleteSubKeyTree(keyPath, false); } catch {}
                 }
-            }
-            else
-            {
-                try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\Directory\Background\shell\PasteImageAsFile", false); } catch {}
-                try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\DesktopBackground\shell\PasteImageAsFile", false); } catch {}
             }
         }
 
         public static void SetHistoryMenuItem(bool visible)
         {
-            if (!Config.ContextMenu || !visible)
+            foreach (var loc in MenuLocations)
             {
-                try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\Directory\Background\shell\PasteImageAsFile_History", false); } catch {}
-                try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\DesktopBackground\shell\PasteImageAsFile_History", false); } catch {}
-                return;
-            }
-
-            string exePath = File.Exists(InstalledExePath) ? InstalledExePath : Application.ExecutablePath;
-            string quotedExe = "\"" + exePath + "\"";
-            string iconRef = "\"" + exePath + "\",0";
-
-            using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\Directory\Background\shell\PasteImageAsFile_History"))
-            {
-                if (key != null)
+                string keyPath = loc + @"\PasteImageAsFile_History";
+                if (!Config.ContextMenu || !visible)
                 {
-                    key.SetValue("", HistoryMenuText);
-                    key.SetValue("Icon", iconRef);
-                    using (var cmd = key.CreateSubKey("command"))
-                    {
-                        if (cmd != null) cmd.SetValue("", quotedExe + " --history");
-                    }
+                    try { Registry.CurrentUser.DeleteSubKeyTree(keyPath, false); } catch {}
                 }
-            }
-
-            using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\DesktopBackground\shell\PasteImageAsFile_History"))
-            {
-                if (key != null)
+                else
                 {
-                    key.SetValue("", HistoryMenuText);
-                    key.SetValue("Icon", iconRef);
-                    using (var cmd = key.CreateSubKey("command"))
+                    string exePath = File.Exists(InstalledExePath) ? InstalledExePath : Application.ExecutablePath;
+                    string quotedExe = "\"" + exePath + "\"";
+                    string iconRef = "\"" + exePath + "\",0";
+
+                    using (var key = Registry.CurrentUser.CreateSubKey(keyPath))
                     {
-                        if (cmd != null) cmd.SetValue("", quotedExe + " --history");
+                        if (key != null)
+                        {
+                            key.SetValue("", HistoryMenuText);
+                            key.SetValue("Icon", iconRef);
+                            using (var cmd = key.CreateSubKey("command"))
+                            {
+                                if (cmd != null) cmd.SetValue("", quotedExe + " --history");
+                            }
+                        }
                     }
                 }
             }
@@ -222,7 +211,6 @@ namespace PasteImageAsFile
             if (enable)
             {
                 SetHistoryMenuItem(Config.ShowHistoryMenu);
-                // По умолчанию показываем пункт вставки, если в кэше есть сохраненные изображения
                 bool hasCached = HasAnyCachedImage();
                 SetImagePasteMenuItem(hasCached);
             }
@@ -233,6 +221,38 @@ namespace PasteImageAsFile
             }
 
             RefreshShellIcons();
+        }
+
+        public static bool IsClassicContextMenuWin11Enabled()
+        {
+            try
+            {
+                using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32", false))
+                {
+                    return key != null;
+                }
+            }
+            catch { return false; }
+        }
+
+        public static void SetClassicContextMenuWin11(bool enable)
+        {
+            try
+            {
+                if (enable)
+                {
+                    using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"))
+                    {
+                        if (key != null) key.SetValue("", "");
+                    }
+                }
+                else
+                {
+                    try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}", false); } catch {}
+                }
+                RefreshShellIcons();
+            }
+            catch {}
         }
 
         public static bool HasAnyCachedImage()
