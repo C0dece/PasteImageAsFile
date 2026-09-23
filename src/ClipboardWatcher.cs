@@ -23,6 +23,7 @@ namespace PasteImageAsFile
         private string lastAugmentedFile = null;
         private DateTime lastAugmentTime = DateTime.MinValue;
         private const int DebounceMs = 500;
+        private FileSystemWatcher desktopWatcher;
 
         public ClipboardListenerWindow()
         {
@@ -39,6 +40,56 @@ namespace PasteImageAsFile
             this.CreateHandle(cp);
             bool ok = AddClipboardFormatListener(this.Handle);
             Logger.Log("ClipboardListenerWindow handle created: " + this.Handle + ", listener added: " + ok);
+
+            InitDesktopWatcher();
+        }
+
+        private void InitDesktopWatcher()
+        {
+            try
+            {
+                string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                if (Directory.Exists(desktopPath))
+                {
+                    desktopWatcher = new FileSystemWatcher(desktopPath);
+                    desktopWatcher.Filter = "*.*";
+                    desktopWatcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.CreationTime;
+                    desktopWatcher.Created += OnDesktopFileCreated;
+                    desktopWatcher.EnableRaisingEvents = true;
+                    Logger.Log("Desktop FileSystemWatcher initialized on " + desktopPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("InitDesktopWatcher error: " + ex.Message);
+            }
+        }
+
+        private void OnDesktopFileCreated(object sender, FileSystemEventArgs e)
+        {
+            try
+            {
+                if (!Config.PlaceUnderCursor) return;
+
+                string ext = Path.GetExtension(e.FullPath).ToLowerInvariant();
+                if (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".bmp") return;
+
+                double elapsed = (DateTime.UtcNow - lastAugmentTime).TotalSeconds;
+                bool isRecent = elapsed < 60.0;
+                bool isOurFile = !string.IsNullOrEmpty(lastAugmentedFile) &&
+                                 string.Equals(Path.GetFileNameWithoutExtension(e.FullPath), Path.GetFileNameWithoutExtension(lastAugmentedFile), StringComparison.OrdinalIgnoreCase);
+
+                if (isRecent || isOurFile)
+                {
+                    Logger.Log("Desktop file created from paste detected: " + e.FullPath);
+                    Thread.Sleep(120);
+                    DesktopHelper.PositionFile(e.FullPath, true);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("OnDesktopFileCreated error: " + ex.Message);
+            }
         }
 
         protected override void WndProc(ref Message m)
@@ -167,6 +218,16 @@ namespace PasteImageAsFile
 
         public void Destroy()
         {
+            if (desktopWatcher != null)
+            {
+                try
+                {
+                    desktopWatcher.EnableRaisingEvents = false;
+                    desktopWatcher.Dispose();
+                    desktopWatcher = null;
+                }
+                catch {}
+            }
             RemoveClipboardFormatListener(this.Handle);
             this.DestroyHandle();
             Logger.Log("ClipboardListenerWindow destroyed");
