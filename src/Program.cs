@@ -16,7 +16,6 @@ namespace PasteImageAsFile
         private static ClipboardListenerWindow watcherWindow;
         private static NotifyIcon trayIcon;
         private static MainForm mainForm;
-        private static AnchorForm anchorForm;
 
         [DllImport("user32.dll")]
         static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
@@ -205,6 +204,12 @@ namespace PasteImageAsFile
                 return true;
             }, IntPtr.Zero);
 
+            if (found == IntPtr.Zero)
+            {
+                string tbClass = screen.Primary ? "Shell_TrayWnd" : "Shell_SecondaryTrayWnd";
+                found = FindWindow(tbClass, null);
+            }
+
             return found;
         }
 
@@ -246,93 +251,45 @@ namespace PasteImageAsFile
                 return;
             }
 
-            try
-            {
-                Logger.Log("ShowClipboardHistory invoked (fromTray=" + fromTray + ")");
+            DesktopHelper.POINT pt;
+            DesktopHelper.TryGetCursorPosition(out pt);
+            Screen targetScreen = Screen.FromPoint(new Point(pt.x, pt.y));
 
-                DesktopHelper.POINT pt;
-                DesktopHelper.TryGetCursorPosition(out pt);
-                Logger.Log("ShowClipboardHistory: target cursor point: " + pt.x + "," + pt.y);
+            Logger.Log("ShowClipboardHistory invoked (fromTray=" + fromTray + ") cursor: " + pt.x + "," + pt.y + " targetScreen: " + targetScreen.DeviceName);
 
-                Screen targetScreen = Screen.FromPoint(new Point(pt.x, pt.y));
-                Logger.Log("ShowClipboardHistory: target screen: " + targetScreen.DeviceName + " bounds: " + targetScreen.Bounds + " workingArea: " + targetScreen.WorkingArea);
-
-                int anchorX;
-                int anchorY;
-
-                if (fromTray)
+            ThreadPool.QueueUserWorkItem(_ => {
+                try
                 {
-                    // Меню истории буфера обмена Windows 11 имеет ширину около 360-380 пикселей.
-                    // При клике в трей позиционируем каретку у правого края монитора, где расположен трей.
-                    anchorX = targetScreen.WorkingArea.Right - 380 - 12;
+                    // Задержка позволяет проводнику завершить клик по трею и освободить захват ввода мыши
+                    Thread.Sleep(fromTray ? 160 : 40);
 
-                    // Если верхняя граница рабочей области смещена вниз от верхней границы монитора,
-                    // значит панель задач находится СВЕРХУ (как в пользовательской конфигурации).
-                    if (targetScreen.WorkingArea.Top > targetScreen.Bounds.Top)
+                    IntPtr targetWin = FindLastActiveUserWindowOnScreen(targetScreen);
+                    if (targetWin != IntPtr.Zero)
                     {
-                        // Меню будет аккуратно выпадать сверху вниз прямо из панели задач у трея
-                        anchorY = targetScreen.WorkingArea.Top + 6;
+                        ForceForegroundWindow(targetWin);
+                        Logger.Log("Focused target window on " + targetScreen.DeviceName + ": " + targetWin);
                     }
-                    else
-                    {
-                        // Трей снизу: меню открывается снизу вверх от панели задач
-                        anchorY = targetScreen.WorkingArea.Bottom - 24;
-                    }
+
+                    Thread.Sleep(50);
+
+                    // Отправляем Win+V штатным системным образом
+                    keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
+                    keybd_event(VK_V, 0, 0, UIntPtr.Zero);
+                    Thread.Sleep(30);
+                    keybd_event(VK_V, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    Logger.Log("Sent Win+V successfully to " + targetScreen.DeviceName);
                 }
-                else
+                catch (Exception ex)
                 {
-                    // Вызов из контекстного меню проводника или рабочего стола: меню открывается рядом с курсором
-                    anchorX = Math.Max(targetScreen.WorkingArea.Left + 10, Math.Min(pt.x - 50, targetScreen.WorkingArea.Right - 380));
-                    anchorY = Math.Max(targetScreen.WorkingArea.Top + 10, Math.Min(pt.y - 10, targetScreen.WorkingArea.Bottom - 100));
+                    Logger.Log("ShowClipboardHistory error: " + ex.Message);
                 }
-
-                Logger.Log("ShowClipboardHistory: target anchor position: (" + anchorX + "," + anchorY + ")");
-
-                Action activateAnchor = () => {
-                    try
-                    {
-                        if (anchorForm == null || anchorForm.IsDisposed)
-                        {
-                            anchorForm = new AnchorForm();
-                        }
-                        anchorForm.PositionAndFocus(anchorX, anchorY);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Log("activateAnchor error: " + ex.Message);
-                    }
-                };
-
-                if (anchorForm != null && !anchorForm.IsDisposed && anchorForm.InvokeRequired)
+                finally
                 {
-                    anchorForm.Invoke(activateAnchor);
-                }
-                else
-                {
-                    activateAnchor();
-                }
-
-                Thread.Sleep(60);
-
-                // Отправляем Win+V системным образом
-                keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
-                keybd_event(VK_V, 0, 0, UIntPtr.Zero);
-                Thread.Sleep(25);
-                keybd_event(VK_V, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                Logger.Log("Sent Win+V successfully");
-            }
-            catch (Exception ex)
-            {
-                Logger.Log("ShowClipboardHistory error: " + ex.Message);
-            }
-            finally
-            {
-                ThreadPool.QueueUserWorkItem(_ => {
-                    Thread.Sleep(600);
+                    Thread.Sleep(500);
                     Interlocked.Exchange(ref isShowingHistory, 0);
-                });
-            }
+                }
+            });
         }
 
         private static void RunDaemonMode()
@@ -488,11 +445,6 @@ namespace PasteImageAsFile
                 trayIcon.Visible = false;
                 trayIcon.Dispose();
                 trayIcon = null;
-            }
-            if (anchorForm != null)
-            {
-                anchorForm.Dispose();
-                anchorForm = null;
             }
             StopWatcher();
             Application.Exit();
