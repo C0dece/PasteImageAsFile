@@ -18,6 +18,13 @@ namespace PasteImageAsFile
         private static NotifyIcon trayIcon;
         private static MainForm mainForm;
 
+        [DllImport("user32.dll")]
+        static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+        const byte VK_LWIN = 0x5B;
+        const byte VK_V = 0x56;
+        const uint KEYEVENTF_KEYUP = 0x0002;
+
         public static bool IsWatcherRunningInCurrentProcess
         {
             get { return watcherWindow != null; }
@@ -48,6 +55,11 @@ namespace PasteImageAsFile
                     ShellIntegration.Uninstall();
                     return;
                 }
+                if (cmd == "--history" || cmd == "-h" || cmd == "--clipboard" || cmd == "-v")
+                {
+                    ShowClipboardHistory();
+                    return;
+                }
                 if (cmd == "--save" || cmd == "-s")
                 {
                     string targetFolder = args.Length > 1 ? args[1] : "";
@@ -67,6 +79,18 @@ namespace PasteImageAsFile
             }
 
             RunInteractiveMode();
+        }
+
+        public static void ShowClipboardHistory()
+        {
+            Logger.Log("ShowClipboardHistory invoked");
+            // Небольшая задержка для завершения анимации закрытия контекстного меню
+            Thread.Sleep(150);
+            keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
+            keybd_event(VK_V, 0, 0, UIntPtr.Zero);
+            Thread.Sleep(20);
+            keybd_event(VK_V, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
         }
 
         private static void RunDaemonMode()
@@ -150,6 +174,7 @@ namespace PasteImageAsFile
                 new MenuItem("Настройки и статус", (s, e) => ShowMainForm()),
                 new MenuItem("-"),
                 new MenuItem("Сохранить картинку на Рабочий стол", (s, e) => SaveDirect(Environment.GetFolderPath(Environment.SpecialFolder.Desktop))),
+                new MenuItem("Буфер обмена (Win+V)", (s, e) => ShowClipboardHistory()),
                 new MenuItem("Открыть папку кэша", (s, e) => {
                     string cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ShellIntegration.AppName, "Cache");
                     if (Directory.Exists(cache)) Process.Start("explorer.exe", cache);
@@ -166,6 +191,10 @@ namespace PasteImageAsFile
                 if (File.Exists(icoPath))
                 {
                     appIcon = new Icon(icoPath);
+                }
+                else
+                {
+                    appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
                 }
             }
             catch {}
@@ -209,6 +238,30 @@ namespace PasteImageAsFile
             Application.Exit();
         }
 
+        private static string GetLatestCacheFile()
+        {
+            try
+            {
+                string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string cacheDir = Path.Combine(localApp, ShellIntegration.AppName, "Cache");
+                if (Directory.Exists(cacheDir))
+                {
+                    var dir = new DirectoryInfo(cacheDir);
+                    var files = dir.GetFiles("*.png");
+                    if (files.Length > 0)
+                    {
+                        Array.Sort(files, (a, b) => b.LastWriteTimeUtc.CompareTo(a.LastWriteTimeUtc));
+                        return files[0].FullName;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("GetLatestCacheFile error: " + ex.Message);
+            }
+            return null;
+        }
+
         public static void SaveDirect(string targetFolder)
         {
             Logger.Log("SaveDirect called for: " + targetFolder);
@@ -217,6 +270,7 @@ namespace PasteImageAsFile
                 targetFolder = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
             }
 
+            // 1. Проверяем, есть ли в буфере готовый файл изображения
             try
             {
                 if (Clipboard.ContainsFileDropList())
@@ -251,6 +305,7 @@ namespace PasteImageAsFile
                 Logger.Log("SaveDirect check file error: " + ex.Message);
             }
 
+            // 2. Проверяем, содержит ли буфер картинку
             Image img = null;
             IDataObject origData = null;
             for (int i = 0; i < 5; i++)
@@ -270,37 +325,66 @@ namespace PasteImageAsFile
                 }
             }
 
-            if (img == null)
+            if (img != null)
             {
-                Logger.Log("SaveDirect: No image in clipboard");
-                System.Media.SystemSounds.Beep.Play();
-                return;
-            }
-
-            try
-            {
-                using (img)
+                try
                 {
-                    string bestName = NameHelper.GetBestImageName(origData);
-                    string ext = ".png";
-                    string targetFilePath = Path.Combine(targetFolder, bestName + ext);
-                    int counter = 1;
-                    while (File.Exists(targetFilePath))
+                    using (img)
                     {
-                        targetFilePath = Path.Combine(targetFolder, bestName + " (" + counter + ")" + ext);
-                        counter++;
-                    }
+                        string bestName = NameHelper.GetBestImageName(origData);
+                        string ext = ".png";
+                        string targetFilePath = Path.Combine(targetFolder, bestName + ext);
+                        int counter = 1;
+                        while (File.Exists(targetFilePath))
+                        {
+                            targetFilePath = Path.Combine(targetFolder, bestName + " (" + counter + ")" + ext);
+                            counter++;
+                        }
 
-                    img.Save(targetFilePath, ImageFormat.Png);
-                    Logger.Log("SaveDirect: Saved bitmap to " + targetFilePath);
-                    System.Media.SystemSounds.Asterisk.Play();
-                    DesktopHelper.PositionFile(targetFilePath, Config.PlaceUnderCursor);
+                        img.Save(targetFilePath, ImageFormat.Png);
+                        Logger.Log("SaveDirect: Saved bitmap to " + targetFilePath);
+                        System.Media.SystemSounds.Asterisk.Play();
+                        DesktopHelper.PositionFile(targetFilePath, Config.PlaceUnderCursor);
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log("SaveDirect save exception: " + ex.Message);
                 }
             }
-            catch (Exception ex)
+
+            // 3. Если в буфере сейчас не изображение (скопирован текст и т.д.), вставляем последнее сохраненное изображение из кэша
+            string latestCached = GetLatestCacheFile();
+            if (!string.IsNullOrEmpty(latestCached) && File.Exists(latestCached))
             {
-                Logger.Log("SaveDirect save exception: " + ex.Message);
+                try
+                {
+                    string srcExt = Path.GetExtension(latestCached).ToLowerInvariant();
+                    string leafName = Path.GetFileName(latestCached);
+                    string destPath = Path.Combine(targetFolder, leafName);
+                    int cnt = 1;
+                    string nameWithoutExt = Path.GetFileNameWithoutExtension(leafName);
+                    while (File.Exists(destPath))
+                    {
+                        destPath = Path.Combine(targetFolder, nameWithoutExt + " (" + cnt + ")" + srcExt);
+                        cnt++;
+                    }
+
+                    File.Copy(latestCached, destPath, true);
+                    System.Media.SystemSounds.Asterisk.Play();
+                    DesktopHelper.PositionFile(destPath, Config.PlaceUnderCursor);
+                    Logger.Log("SaveDirect: Fallback copied latest cached image to " + destPath);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log("SaveDirect fallback copy error: " + ex.Message);
+                }
             }
+
+            Logger.Log("SaveDirect: No image in clipboard or cache");
+            System.Media.SystemSounds.Beep.Play();
         }
     }
 }

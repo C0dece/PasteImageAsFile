@@ -7,7 +7,7 @@ $dstIco = $args[2]
 $src = [System.Drawing.Image]::FromFile($srcPath)
 $size = $src.Width
 
-# Создаем bitmap с прозрачным фоном
+# Создаем базовый 512x512 или размер источника с прозрачными скругленными углами
 $bmp = New-Object System.Drawing.Bitmap($size, $size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
@@ -36,8 +36,8 @@ $path.Dispose()
 $bmp.Save($dstPng, [System.Drawing.Imaging.ImageFormat]::Png)
 Write-Host "PNG saved: $dstPng"
 
-# Создаем ICO (BMP/DIB формат с альфа-каналом)
-$sizes = @(16, 32, 48)
+# Размеры для ICO: стандартный набор Windows (16, 24, 32, 48, 64, 128, 256)
+$sizes = @(16, 24, 32, 48, 64, 128, 256)
 
 $ms = New-Object System.IO.MemoryStream
 $bw = New-Object System.IO.BinaryWriter($ms)
@@ -73,13 +73,16 @@ foreach ($s in $sizes) {
         [Array]::Copy($bytes, $srcOff, $flipped, $dstOff, $stride)
     }
 
+    # AND mask (1 bit per pixel, padded to 32 bits per row)
     $andMaskRowBytes = [int]([Math]::Ceiling($s / 32.0)) * 4
     $andMaskSize = $andMaskRowBytes * $s
     $andMask = New-Object byte[] $andMaskSize
+    # Заполняем 0 (все пиксели видимы или определяются альфа-каналом 32bpp)
 
     $dibMs = New-Object System.IO.MemoryStream
     $dibBw = New-Object System.IO.BinaryWriter($dibMs)
 
+    # BITMAPINFOHEADER
     $dibBw.Write([uint32]40)
     $dibBw.Write([int32]$s)
     $dibBw.Write([int32]($s * 2))
@@ -100,8 +103,10 @@ foreach ($s in $sizes) {
     $dibBw.Dispose()
     $dibMs.Dispose()
 
-    $bw.Write([byte]$s)
-    $bw.Write([byte]$s)
+    # Для 256 в ICONDIRENTRY ширина и высота записываются как 0
+    $iconDim = if ($s -ge 256) { 0 } else { [byte]$s }
+    $bw.Write([byte]$iconDim)
+    $bw.Write([byte]$iconDim)
     $bw.Write([byte]0)
     $bw.Write([byte]0)
     $bw.Write([uint16]1)
@@ -129,4 +134,4 @@ $ms.Dispose()
 $bmp.Dispose()
 $src.Dispose()
 
-Write-Host "ICO saved: $dstIco ($($sizes.Count) sizes, transparent corners)"
+Write-Host "ICO saved: $dstIco ($($sizes.Count) sizes including 256x256, transparent corners)"

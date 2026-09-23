@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Diagnostics;
 using System.Windows.Forms;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace PasteImageAsFile
@@ -10,7 +11,14 @@ namespace PasteImageAsFile
     {
         public const string AppName = "PasteImageAsFile";
         public const string MenuText = "Вставить изображение из буфера";
-        public const string AppVersion = "1.1.0";
+        public const string HistoryMenuText = "Буфер обмена";
+        public const string AppVersion = "1.2.0";
+
+        [DllImport("shell32.dll")]
+        public static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+
+        const uint SHCNE_ASSOCCHANGED = 0x08000000;
+        const uint SHCNF_IDLIST = 0x0000;
 
         public static string InstallDir
         {
@@ -81,11 +89,20 @@ namespace PasteImageAsFile
                 File.Copy(currentExe, InstalledExePath, true);
             }
 
+            string currentIco = Path.Combine(Path.GetDirectoryName(currentExe), "app.ico");
+            string installedIco = Path.Combine(InstallDir, "app.ico");
+            if (File.Exists(currentIco) && !string.Equals(currentIco, installedIco, StringComparison.OrdinalIgnoreCase))
+            {
+                try { File.Copy(currentIco, installedIco, true); } catch {}
+            }
+
             SetContextMenu(contextMenu);
             SetAutoRun(autoRun);
 
             Config.AutoRun = autoRun;
             Config.ContextMenu = contextMenu;
+
+            RefreshShellIcons();
         }
 
         public static void Uninstall()
@@ -103,20 +120,25 @@ namespace PasteImageAsFile
                 }
             }
             catch {}
+
+            RefreshShellIcons();
         }
 
         public static void SetContextMenu(bool enable)
         {
-            string quotedExe = "\"" + InstalledExePath + "\"";
+            string exePath = File.Exists(InstalledExePath) ? InstalledExePath : Application.ExecutablePath;
+            string quotedExe = "\"" + exePath + "\"";
+            string iconRef = "\"" + exePath + "\",0";
 
             if (enable)
             {
+                // 1. Пункт "Вставить изображение из буфера" в папке
                 using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\Directory\Background\shell\PasteImageAsFile"))
                 {
                     if (key != null)
                     {
                         key.SetValue("", MenuText);
-                        key.SetValue("Icon", "imageres.dll,-70");
+                        key.SetValue("Icon", iconRef);
                         using (var cmd = key.CreateSubKey("command"))
                         {
                             if (cmd != null) cmd.SetValue("", quotedExe + " --save \"%V\"");
@@ -124,15 +146,44 @@ namespace PasteImageAsFile
                     }
                 }
 
+                // 2. Пункт "Вставить изображение из буфера" на Рабочем столе
                 using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\DesktopBackground\shell\PasteImageAsFile"))
                 {
                     if (key != null)
                     {
                         key.SetValue("", MenuText);
-                        key.SetValue("Icon", "imageres.dll,-70");
+                        key.SetValue("Icon", iconRef);
                         using (var cmd = key.CreateSubKey("command"))
                         {
                             if (cmd != null) cmd.SetValue("", quotedExe + " --save \"%V\"");
+                        }
+                    }
+                }
+
+                // 3. Пункт "Буфер обмена" (вызов Win+V) в папке
+                using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\Directory\Background\shell\PasteImageAsFile_History"))
+                {
+                    if (key != null)
+                    {
+                        key.SetValue("", HistoryMenuText);
+                        key.SetValue("Icon", iconRef);
+                        using (var cmd = key.CreateSubKey("command"))
+                        {
+                            if (cmd != null) cmd.SetValue("", quotedExe + " --history");
+                        }
+                    }
+                }
+
+                // 4. Пункт "Буфер обмена" (вызов Win+V) на Рабочем столе
+                using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\DesktopBackground\shell\PasteImageAsFile_History"))
+                {
+                    if (key != null)
+                    {
+                        key.SetValue("", HistoryMenuText);
+                        key.SetValue("Icon", iconRef);
+                        using (var cmd = key.CreateSubKey("command"))
+                        {
+                            if (cmd != null) cmd.SetValue("", quotedExe + " --history");
                         }
                     }
                 }
@@ -141,11 +192,16 @@ namespace PasteImageAsFile
             {
                 try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\Directory\Background\shell\PasteImageAsFile", false); } catch {}
                 try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\DesktopBackground\shell\PasteImageAsFile", false); } catch {}
+                try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\Directory\Background\shell\PasteImageAsFile_History", false); } catch {}
+                try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\DesktopBackground\shell\PasteImageAsFile_History", false); } catch {}
             }
+
+            RefreshShellIcons();
         }
 
         public static void SetAutoRun(bool enable)
         {
+            string exePath = File.Exists(InstalledExePath) ? InstalledExePath : Application.ExecutablePath;
             try
             {
                 using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
@@ -154,7 +210,7 @@ namespace PasteImageAsFile
                     {
                         if (enable)
                         {
-                            key.SetValue(AppName, "\"" + InstalledExePath + "\" --daemon");
+                            key.SetValue(AppName, "\"" + exePath + "\" --daemon");
                         }
                         else
                         {
@@ -162,6 +218,15 @@ namespace PasteImageAsFile
                         }
                     }
                 }
+            }
+            catch {}
+        }
+
+        public static void RefreshShellIcons()
+        {
+            try
+            {
+                SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
             }
             catch {}
         }

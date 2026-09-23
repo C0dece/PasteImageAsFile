@@ -10,7 +10,6 @@ echo Compiling PasteImageAsFile...
 
 if %errorlevel% neq 0 (
     echo Build FAILED.
-    pause
     exit /b 1
 )
 

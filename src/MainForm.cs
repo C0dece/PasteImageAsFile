@@ -81,6 +81,10 @@ namespace PasteImageAsFile
                 {
                     this.Icon = new Icon(icoPath);
                 }
+                else
+                {
+                    this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                }
             }
             catch {}
 
@@ -176,7 +180,7 @@ namespace PasteImageAsFile
             chkAutoRun = CreateCheckBox("Автозапуск вместе со стартом Windows", 18, chkTop);
             chkAutoRun.CheckedChanged += (s, e) => { Config.AutoRun = chkAutoRun.Checked; ShellIntegration.SetAutoRun(chkAutoRun.Checked); };
 
-            chkContextMenu = CreateCheckBox("Контекстное меню в Проводнике", 18, chkTop + chkStep);
+            chkContextMenu = CreateCheckBox("Контекстное меню (вставка картинок и буфер обмена)", 18, chkTop + chkStep);
             chkContextMenu.CheckedChanged += (s, e) => { Config.ContextMenu = chkContextMenu.Checked; ShellIntegration.SetContextMenu(chkContextMenu.Checked); };
 
             chkPlaceUnderCursor = CreateCheckBox("Размещать файл под курсором на Рабочем столе", 18, chkTop + chkStep * 2);
@@ -379,9 +383,10 @@ namespace PasteImageAsFile
             Program.StartWatcher();
             MessageBox.Show(
                 "Утилита установлена в систему!\n\n" +
-                "Теперь при копировании картинок (скриншот, браузер)\n" +
-                "можно сразу нажимать Ctrl+V в Проводнике\n" +
-                "или на Рабочем столе.",
+                "1. Если скопирована картинка: нажимай Ctrl+V в Проводнике или на Рабочем столе.\n" +
+                "2. В контекстное меню добавлены пункты с иконкой программы:\n" +
+                "   - 'Вставить изображение из буфера' (вставляет последнюю картинку, даже если сейчас в буфере текст)\n" +
+                "   - 'Буфер обмена' (открывает системный журнал Win+V)",
                 "PasteImageAsFile",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information
