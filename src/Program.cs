@@ -59,6 +59,29 @@ namespace PasteImageAsFile
         const uint SWP_NOSIZE = 0x0001;
         const uint SWP_NOZORDER = 0x0004;
         const uint SWP_SHOWWINDOW = 0x0040;
+        [DllImport("user32.dll")]
+        static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        static extern bool IsIconic(IntPtr hWnd);
+
+        [DllImport("user32.dll", ExactSpelling = true)]
+        static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+        [DllImport("kernel32.dll")]
+        static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll")]
+        static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+        [DllImport("user32.dll")]
+        static extern bool AllowSetForegroundWindow(int dwProcessId);
+
+        const uint GA_ROOT = 2;
+        const int ASFW_ANY = -1;
 
         public static bool IsWatcherRunningInCurrentProcess
         {
@@ -116,6 +139,90 @@ namespace PasteImageAsFile
             RunInteractiveMode();
         }
 
+        public static bool IsTaskbarOrTrayWindow(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return false;
+            try
+            {
+                var sb = new System.Text.StringBuilder(128);
+                GetClassName(hwnd, sb, 128);
+                string cls = sb.ToString();
+                if (cls == "Shell_TrayWnd" ||
+                    cls == "Shell_SecondaryTrayWnd" ||
+                    cls == "TopLevelWindowForOverflowXamlIsland" ||
+                    cls == "NotifyIconOverflowWindow" ||
+                    cls == "Windows.UI.Core.CoreWindow" ||
+                    cls.StartsWith("XamlExplorerHostIslandWindow", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            catch {}
+            return false;
+        }
+
+        private static IntPtr FindLastActiveUserWindow()
+        {
+            IntPtr found = IntPtr.Zero;
+            uint currentPid = (uint)Process.GetCurrentProcess().Id;
+
+            EnumWindows((hwnd, lParam) => {
+                if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return true;
+
+                uint pid;
+                GetWindowThreadProcessId(hwnd, out pid);
+                if (pid == currentPid) return true;
+
+                RECT rc;
+                GetWindowRect(hwnd, out rc);
+                int w = rc.Right - rc.Left;
+                int h = rc.Bottom - rc.Top;
+                if (w < 100 || h < 100) return true;
+
+                if (IsTaskbarOrTrayWindow(hwnd)) return true;
+
+                var sb = new System.Text.StringBuilder(128);
+                GetClassName(hwnd, sb, 128);
+                string cls = sb.ToString();
+                if (cls == "Progman" || cls == "WorkerW") return true;
+
+                found = hwnd;
+                return false;
+            }, IntPtr.Zero);
+
+            return found;
+        }
+
+        private static void ForceForegroundWindow(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero) return;
+            try
+            {
+                AllowSetForegroundWindow(ASFW_ANY);
+                uint foreThread = 0;
+                IntPtr fg = GetForegroundWindow();
+                if (fg != IntPtr.Zero)
+                {
+                    GetWindowThreadProcessId(fg, out foreThread);
+                }
+                uint appThread = GetCurrentThreadId();
+                if (foreThread != 0 && foreThread != appThread)
+                {
+                    AttachThreadInput(appThread, foreThread, true);
+                    SetForegroundWindow(hWnd);
+                    AttachThreadInput(appThread, foreThread, false);
+                }
+                else
+                {
+                    SetForegroundWindow(hWnd);
+                }
+            }
+            catch
+            {
+                SetForegroundWindow(hWnd);
+            }
+        }
+
         public static void ShowClipboardHistory()
         {
             Logger.Log("ShowClipboardHistory invoked");
@@ -124,19 +231,48 @@ namespace PasteImageAsFile
             DesktopHelper.TryGetCursorPosition(out pt);
             Logger.Log("ShowClipboardHistory: target cursor point: " + pt.x + "," + pt.y);
 
-            // Активируем окно под курсором
+            // Определяем, какое окно активировать, чтобы фокус не остался на панели задач / трее
             try
             {
                 IntPtr targetWin = WindowFromPoint(pt);
-                if (targetWin != IntPtr.Zero)
+                IntPtr root = (targetWin != IntPtr.Zero) ? GetAncestor(targetWin, GA_ROOT) : IntPtr.Zero;
+                IntPtr candidate = (root != IntPtr.Zero) ? root : targetWin;
+
+                if (candidate != IntPtr.Zero && !IsTaskbarOrTrayWindow(candidate))
                 {
-                    SetForegroundWindow(targetWin);
+                    // Клик был сделан не над панелью задач (например, в контекстном меню папки или на рабочем столе)
+                    Logger.Log("Activating under-cursor window: " + candidate);
+                    ForceForegroundWindow(candidate);
+                }
+                else
+                {
+                    // Клик был по иконке в трее или на панели задач:
+                    // Чтобы панель задач не перешла в режим клавиатурной навигации и не подсветила иконку трея белой рамкой,
+                    // переводим фокус на рабочее приложение пользователя или рабочий стол.
+                    IntPtr userWin = FindLastActiveUserWindow();
+                    if (userWin != IntPtr.Zero)
+                    {
+                        Logger.Log("Unfocusing tray: transferring focus to user window: " + userWin);
+                        ForceForegroundWindow(userWin);
+                    }
+                    else
+                    {
+                        IntPtr progman = FindWindow("Progman", null);
+                        if (progman != IntPtr.Zero)
+                        {
+                            Logger.Log("Unfocusing tray: transferring focus to Progman");
+                            ForceForegroundWindow(progman);
+                        }
+                    }
                 }
             }
-            catch {}
+            catch (Exception ex)
+            {
+                Logger.Log("ShowClipboardHistory focus error: " + ex.Message);
+            }
 
-            // Небольшая задержка для завершения анимации закрытия контекстного меню
-            Thread.Sleep(120);
+            // Небольшая задержка, чтобы Taskbar завершил обработку клика мыши и отпустил клавиатурный фокус
+            Thread.Sleep(80);
 
             // Отправляем Win+V
             keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
@@ -185,23 +321,28 @@ namespace PasteImageAsFile
                 {
                     RECT rc;
                     GetWindowRect(foundHwnd, out rc);
-                    int w = rc.Right - rc.Left;
-                    int h = rc.Bottom - rc.Top;
+                    int rawW = rc.Right - rc.Left;
+                    int rawH = rc.Bottom - rc.Top;
+
+                    // Окно буфера в Windows 11 может иметь canvas во весь экран (1920x1080),
+                    // в то время как само меню занимает около 360x480 пикселей.
+                    int effW = (rawW > 600 || rawW < 100) ? 360 : rawW;
+                    int effH = (rawH > 800 || rawH < 100) ? 480 : rawH;
 
                     int targetX = pt.x + 8;
                     int targetY = pt.y + 8;
                     try
                     {
                         var screen = Screen.FromPoint(new Point(pt.x, pt.y)).WorkingArea;
-                        if (targetX + w > screen.Right) targetX = pt.x - w - 8;
-                        if (targetY + h > screen.Bottom) targetY = pt.y - h - 8;
+                        if (targetX + effW > screen.Right) targetX = pt.x - effW - 8;
+                        if (targetY + effH > screen.Bottom) targetY = pt.y - effH - 8;
                         if (targetX < screen.Left) targetX = screen.Left + 8;
                         if (targetY < screen.Top) targetY = screen.Top + 8;
                     }
                     catch {}
 
                     SetWindowPos(foundHwnd, IntPtr.Zero, targetX, targetY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
-                    Logger.Log("Moved Clipboard History window to " + targetX + "," + targetY);
+                    Logger.Log("Moved Clipboard History window to " + targetX + "," + targetY + " (eff size: " + effW + "x" + effH + ")");
                     break;
                 }
             }
