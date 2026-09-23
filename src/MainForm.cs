@@ -125,10 +125,11 @@ namespace PasteImageAsFile
             lblStatusSub = new Label();
             lblStatusSub.Font = new Font("Segoe UI", 8.5f);
             lblStatusSub.ForeColor = TextSecondary;
-            lblStatusSub.AutoSize = true;
+            lblStatusSub.AutoSize = false;
+            lblStatusSub.Size = new Size(270, 32);
             lblStatusSub.Location = new Point(40, 42);
 
-            btnToggleDaemon = CreateButton("Остановить", 320, 20, 106, 34);
+            btnToggleDaemon = CreateButton("Остановить", 326, 24, 100, 30);
             btnToggleDaemon.Click += BtnToggleDaemon_Click;
 
             pnlStatusCard.Controls.Add(pnlStatusDot);
