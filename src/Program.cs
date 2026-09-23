@@ -21,6 +21,12 @@ namespace PasteImageAsFile
         static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
         [DllImport("user32.dll")]
+        static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+
+        const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+        const uint MOUSEEVENTF_LEFTUP = 0x0004;
+
+        [DllImport("user32.dll")]
         static extern IntPtr WindowFromPoint(DesktopHelper.POINT Point);
 
         [DllImport("user32.dll")]
@@ -265,20 +271,23 @@ namespace PasteImageAsFile
                     {
                         ForceForegroundWindow(targetWin);
                         Logger.Log("Focused target window on " + targetScreen.DeviceName + ": " + targetWin);
+                        Thread.Sleep(40);
                     }
                     else
                     {
-                        IntPtr progman = FindWindow("Progman", null);
-                        if (progman != IntPtr.Zero)
-                        {
-                            ForceForegroundWindow(progman);
-                            Logger.Log("Focused Progman for desktop on " + targetScreen.DeviceName);
-                        }
+                        // Если на целевом мониторе все окна свернуты, переводим фокус на его рабочий стол
+                        // быстрым кликом в свободный правый край экрана (где гарантированно нет иконок)
+                        int clickX = targetScreen.Bounds.Right - 10;
+                        int clickY = targetScreen.WorkingArea.Top + 100;
+                        SetCursorPos(clickX, clickY);
+                        Thread.Sleep(20);
+                        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+                        Thread.Sleep(20);
+                        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
+                        Thread.Sleep(40);
+                        SetCursorPos(pt.x, pt.y);
+                        Logger.Log("Activated desktop on " + targetScreen.DeviceName + " via edge click");
                     }
-
-                    // Гарантируем, что курсор мыши находится на целевом мониторе в точке клика
-                    SetCursorPos(pt.x, pt.y);
-                    Thread.Sleep(50);
 
                     // Отправляем Win+V штатным системным образом
                     keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
