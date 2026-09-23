@@ -27,6 +27,9 @@ namespace PasteImageAsFile
         static extern bool SetForegroundWindow(IntPtr hWnd);
 
         [DllImport("user32.dll")]
+        static extern bool SetCursorPos(int X, int Y);
+
+        [DllImport("user32.dll")]
         static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
         [DllImport("user32.dll")]
@@ -204,12 +207,6 @@ namespace PasteImageAsFile
                 return true;
             }, IntPtr.Zero);
 
-            if (found == IntPtr.Zero)
-            {
-                string tbClass = screen.Primary ? "Shell_TrayWnd" : "Shell_SecondaryTrayWnd";
-                found = FindWindow(tbClass, null);
-            }
-
             return found;
         }
 
@@ -269,7 +266,18 @@ namespace PasteImageAsFile
                         ForceForegroundWindow(targetWin);
                         Logger.Log("Focused target window on " + targetScreen.DeviceName + ": " + targetWin);
                     }
+                    else
+                    {
+                        IntPtr progman = FindWindow("Progman", null);
+                        if (progman != IntPtr.Zero)
+                        {
+                            ForceForegroundWindow(progman);
+                            Logger.Log("Focused Progman for desktop on " + targetScreen.DeviceName);
+                        }
+                    }
 
+                    // Гарантируем, что курсор мыши находится на целевом мониторе в точке клика
+                    SetCursorPos(pt.x, pt.y);
                     Thread.Sleep(50);
 
                     // Отправляем Win+V штатным системным образом
