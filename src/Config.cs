@@ -31,6 +31,12 @@ namespace PasteImageAsFile
             set { SetDword("ExtractOriginalName", value ? 1 : 0); }
         }
 
+        public static bool ShowHistoryMenu
+        {
+            get { return GetDword("ShowHistoryMenu", 1) == 1; }
+            set { SetDword("ShowHistoryMenu", value ? 1 : 0); }
+        }
+
         public static string DefaultPrefix
         {
             get { return GetString("DefaultPrefix", "Снимок"); }

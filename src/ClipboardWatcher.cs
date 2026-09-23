@@ -42,6 +42,9 @@ namespace PasteImageAsFile
             Logger.Log("ClipboardListenerWindow handle created: " + this.Handle + ", listener added: " + ok);
 
             InitDesktopWatcher();
+
+            // Проверяем начальное состояние буфера для меню
+            UpdateMenuStateForClipboard();
         }
 
         private void InitDesktopWatcher()
@@ -110,6 +113,46 @@ namespace PasteImageAsFile
             base.WndProc(ref m);
         }
 
+        private void UpdateMenuStateForClipboard()
+        {
+            try
+            {
+                bool hasImage = false;
+                if (Clipboard.ContainsImage())
+                {
+                    hasImage = true;
+                }
+                else if (Clipboard.ContainsFileDropList())
+                {
+                    var files = Clipboard.GetFileDropList();
+                    if (files.Count == 1 && File.Exists(files[0]))
+                    {
+                        string ext = Path.GetExtension(files[0]).ToLowerInvariant();
+                        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp")
+                        {
+                            hasImage = true;
+                        }
+                    }
+                }
+
+                if (hasImage)
+                {
+                    // В буфере сейчас картинка -> работает стандартный Ctrl+V, пункт меню скрываем
+                    ShellIntegration.SetImagePasteMenuItem(false);
+                }
+                else
+                {
+                    // В буфере сейчас НЕ картинка -> если в кэше есть сохраненная картинка, показываем пункт
+                    bool hasCached = ShellIntegration.HasAnyCachedImage();
+                    ShellIntegration.SetImagePasteMenuItem(hasCached);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("UpdateMenuStateForClipboard error: " + ex.Message);
+            }
+        }
+
         private void OnClipboardUpdated()
         {
             Image img = null;
@@ -121,6 +164,7 @@ namespace PasteImageAsFile
                 {
                     if (!Clipboard.ContainsImage())
                     {
+                        UpdateMenuStateForClipboard();
                         return;
                     }
 
@@ -129,9 +173,11 @@ namespace PasteImageAsFile
                         var files = Clipboard.GetFileDropList();
                         if (files.Count == 1 && string.Equals(files[0], lastAugmentedFile, StringComparison.OrdinalIgnoreCase))
                         {
+                            // Это наш собственный аугментированный файл
                             return;
                         }
-                        // Файл скопирован пользователем в Проводнике, не вмешиваемся
+                        // Файл скопирован пользователем в Проводнике
+                        UpdateMenuStateForClipboard();
                         return;
                     }
 
@@ -146,7 +192,11 @@ namespace PasteImageAsFile
                 }
             }
 
-            if (img == null || origData == null) return;
+            if (img == null || origData == null)
+            {
+                UpdateMenuStateForClipboard();
+                return;
+            }
 
             try
             {
@@ -187,6 +237,9 @@ namespace PasteImageAsFile
                 lastAugmentTime = DateTime.UtcNow;
                 Clipboard.SetDataObject(aug, true);
                 Logger.Log("Augmented clipboard with: " + tempFilePath);
+
+                // В буфере сейчас готовая картинка для Ctrl+V -> пункт меню "Вставить изображение" не нужен
+                ShellIntegration.SetImagePasteMenuItem(false);
             }
             catch (Exception ex)
             {
@@ -204,10 +257,10 @@ namespace PasteImageAsFile
             {
                 var dir = new DirectoryInfo(CacheDirectory);
                 var files = dir.GetFiles("*.png");
-                if (files.Length > 30)
+                if (files.Length > 50)
                 {
                     Array.Sort(files, (a, b) => a.CreationTime.CompareTo(b.CreationTime));
-                    for (int i = 0; i < files.Length - 30; i++)
+                    for (int i = 0; i < files.Length - 50; i++)
                     {
                         try { files[i].Delete(); } catch {}
                     }

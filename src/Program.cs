@@ -21,9 +21,44 @@ namespace PasteImageAsFile
         [DllImport("user32.dll")]
         static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
+        [DllImport("user32.dll")]
+        static extern IntPtr WindowFromPoint(DesktopHelper.POINT Point);
+
+        [DllImport("user32.dll")]
+        static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+        [DllImport("user32.dll")]
+        static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+        [DllImport("user32.dll")]
+        static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+        delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT { public int Left, Top, Right, Bottom; }
+
         const byte VK_LWIN = 0x5B;
         const byte VK_V = 0x56;
         const uint KEYEVENTF_KEYUP = 0x0002;
+        const uint SWP_NOSIZE = 0x0001;
+        const uint SWP_NOZORDER = 0x0004;
+        const uint SWP_SHOWWINDOW = 0x0040;
 
         public static bool IsWatcherRunningInCurrentProcess
         {
@@ -84,13 +119,92 @@ namespace PasteImageAsFile
         public static void ShowClipboardHistory()
         {
             Logger.Log("ShowClipboardHistory invoked");
+
+            DesktopHelper.POINT pt;
+            DesktopHelper.TryGetCursorPosition(out pt);
+            Logger.Log("ShowClipboardHistory: target cursor point: " + pt.x + "," + pt.y);
+
+            // Активируем окно под курсором
+            try
+            {
+                IntPtr targetWin = WindowFromPoint(pt);
+                if (targetWin != IntPtr.Zero)
+                {
+                    SetForegroundWindow(targetWin);
+                }
+            }
+            catch {}
+
             // Небольшая задержка для завершения анимации закрытия контекстного меню
-            Thread.Sleep(150);
+            Thread.Sleep(120);
+
+            // Отправляем Win+V
             keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
             keybd_event(VK_V, 0, 0, UIntPtr.Zero);
             Thread.Sleep(20);
             keybd_event(VK_V, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
             keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+            // Отслеживаем появление окна истории буфера обмена и смещаем его к курсору
+            for (int i = 0; i < 20; i++)
+            {
+                Thread.Sleep(40);
+                IntPtr foundHwnd = IntPtr.Zero;
+
+                EnumWindows((hwnd, lParam) => {
+                    if (!IsWindowVisible(hwnd)) return true;
+                    uint pid;
+                    GetWindowThreadProcessId(hwnd, out pid);
+                    try
+                    {
+                        var proc = Process.GetProcessById((int)pid);
+                        string pName = proc.ProcessName.ToLowerInvariant();
+                        if (pName == "textinputhost" || pName == "shellexperiencehost")
+                        {
+                            var sbClass = new System.Text.StringBuilder(256);
+                            GetClassName(hwnd, sbClass, 256);
+                            string cls = sbClass.ToString();
+
+                            RECT rc;
+                            GetWindowRect(hwnd, out rc);
+                            int w = rc.Right - rc.Left;
+                            int h = rc.Bottom - rc.Top;
+
+                            if (w > 180 && h > 180)
+                            {
+                                foundHwnd = hwnd;
+                                return false;
+                            }
+                        }
+                    }
+                    catch {}
+                    return true;
+                }, IntPtr.Zero);
+
+                if (foundHwnd != IntPtr.Zero)
+                {
+                    RECT rc;
+                    GetWindowRect(foundHwnd, out rc);
+                    int w = rc.Right - rc.Left;
+                    int h = rc.Bottom - rc.Top;
+
+                    int targetX = pt.x + 8;
+                    int targetY = pt.y + 8;
+                    try
+                    {
+                        var screen = Screen.FromPoint(new Point(pt.x, pt.y)).WorkingArea;
+                        if (targetX + w > screen.Right) targetX = pt.x - w - 8;
+                        if (targetY + h > screen.Bottom) targetY = pt.y - h - 8;
+                        if (targetX < screen.Left) targetX = screen.Left + 8;
+                        if (targetY < screen.Top) targetY = screen.Top + 8;
+                    }
+                    catch {}
+
+                    SetWindowPos(foundHwnd, IntPtr.Zero, targetX, targetY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
+                    Logger.Log("Moved Clipboard History window to " + targetX + "," + targetY);
+                    break;
+                }
+            }
         }
 
         private static void RunDaemonMode()
