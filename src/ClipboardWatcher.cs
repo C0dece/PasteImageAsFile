@@ -251,6 +251,34 @@ namespace PasteImageAsFile
             }
         }
 
+        public static void AugmentClipboardWithImage(string filePath)
+        {
+            if (!File.Exists(filePath)) return;
+            try
+            {
+                using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var img = Image.FromStream(stream))
+                {
+                    DataObject data = new DataObject();
+                    data.SetImage(new Bitmap(img));
+
+                    StringCollection fl = new StringCollection();
+                    fl.Add(filePath);
+                    data.SetFileDropList(fl);
+
+                    byte[] dropEffect = new byte[] { 1, 0, 0, 0 };
+                    data.SetData("Preferred DropEffect", new MemoryStream(dropEffect));
+
+                    Clipboard.SetDataObject(data, true);
+                    Logger.Log("AugmentClipboardWithImage: set file and image to clipboard: " + filePath);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("AugmentClipboardWithImage error: " + ex.Message);
+            }
+        }
+
         private void CleanOldCache()
         {
             try

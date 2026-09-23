@@ -246,6 +246,8 @@ namespace PasteImageAsFile
             }
         }
 
+        private static Form winVAnchor;
+
         public static void ShowClipboardHistory(bool fromTray = false)
         {
             if (Interlocked.CompareExchange(ref isShowingHistory, 1, 0) != 0)
@@ -263,8 +265,7 @@ namespace PasteImageAsFile
             ThreadPool.QueueUserWorkItem(_ => {
                 try
                 {
-                    // Задержка позволяет проводнику завершить клик по трею и освободить захват ввода мыши
-                    Thread.Sleep(fromTray ? 160 : 40);
+                    Thread.Sleep(fromTray ? 100 : 30);
 
                     IntPtr targetWin = FindLastActiveUserWindowOnScreen(targetScreen);
                     if (targetWin != IntPtr.Zero)
@@ -275,18 +276,49 @@ namespace PasteImageAsFile
                     }
                     else
                     {
-                        // Если на целевом мониторе все окна свернуты, переводим фокус на его рабочий стол
-                        // быстрым кликом в свободный правый край экрана (где гарантированно нет иконок)
-                        int clickX = targetScreen.Bounds.Right - 10;
-                        int clickY = targetScreen.WorkingArea.Top + 100;
-                        SetCursorPos(clickX, clickY);
-                        Thread.Sleep(20);
-                        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
-                        Thread.Sleep(20);
-                        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
-                        Thread.Sleep(40);
-                        SetCursorPos(pt.x, pt.y);
-                        Logger.Log("Activated desktop on " + targetScreen.DeviceName + " via edge click");
+                        // Если на экране нет открытых окон пользователя, создаем временную якорную форму
+                        // на целевом экране, чтобы системный буфер открылся на целевом мониторе, и НЕ закрываем
+                        // ее сразу (чтобы TextInputHost успел инициализироваться и не сбросился)
+                        try
+                        {
+                            Action createAnchor = () => {
+                                try
+                                {
+                                    if (winVAnchor != null && !winVAnchor.IsDisposed)
+                                    {
+                                        winVAnchor.Close();
+                                        winVAnchor.Dispose();
+                                    }
+                                    winVAnchor = new Form
+                                    {
+                                        FormBorderStyle = FormBorderStyle.None,
+                                        StartPosition = FormStartPosition.Manual,
+                                        Location = new Point(targetScreen.WorkingArea.Right - 80, targetScreen.WorkingArea.Top + 40),
+                                        Size = new Size(30, 30),
+                                        BackColor = Color.FromArgb(28, 28, 28),
+                                        ShowInTaskbar = false,
+                                        TopMost = true
+                                    };
+                                    winVAnchor.Show();
+                                    winVAnchor.BringToFront();
+                                    ForceForegroundWindow(winVAnchor.Handle);
+                                }
+                                catch {}
+                            };
+
+                            if (mainForm != null && !mainForm.IsDisposed && mainForm.InvokeRequired)
+                            {
+                                mainForm.Invoke(createAnchor);
+                            }
+                            else
+                            {
+                                createAnchor();
+                            }
+                        }
+                        catch {}
+
+                        Thread.Sleep(80);
+                        Logger.Log("Created anchor window on " + targetScreen.DeviceName + " for Win+V");
                     }
 
                     // Отправляем Win+V штатным системным образом
@@ -296,6 +328,37 @@ namespace PasteImageAsFile
                     keybd_event(VK_V, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
                     keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
                     Logger.Log("Sent Win+V successfully to " + targetScreen.DeviceName);
+
+                    // Если создавали якорную форму, оставляем ее на 3 секунды, затем плавно освобождаем
+                    if (winVAnchor != null)
+                    {
+                        Thread.Sleep(3000);
+                        try
+                        {
+                            Action closeAnchor = () => {
+                                try
+                                {
+                                    if (winVAnchor != null && !winVAnchor.IsDisposed)
+                                    {
+                                        winVAnchor.Close();
+                                        winVAnchor.Dispose();
+                                        winVAnchor = null;
+                                    }
+                                }
+                                catch {}
+                            };
+
+                            if (mainForm != null && !mainForm.IsDisposed && mainForm.InvokeRequired)
+                            {
+                                mainForm.Invoke(closeAnchor);
+                            }
+                            else
+                            {
+                                closeAnchor();
+                            }
+                        }
+                        catch {}
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -387,14 +450,20 @@ namespace PasteImageAsFile
             autoRunItem.Checked = Config.AutoRun;
 
             ContextMenu menu = new ContextMenu(new MenuItem[] {
-                new MenuItem("Настройки и статус", (s, e) => ShowMainForm()),
+                new MenuItem("Буфер обмена (из трея)", (s, e) => {
+                    IntPtr prevFg = GetForegroundWindow();
+                    DesktopHelper.POINT curPt;
+                    DesktopHelper.TryGetCursorPosition(out curPt);
+                    ClipboardFlyoutForm.ShowFlyout(new Point(curPt.x, curPt.y), prevFg);
+                }),
+                new MenuItem("Системный буфер (Win+V)", (s, e) => ShowClipboardHistory(true)),
                 new MenuItem("-"),
                 new MenuItem("Сохранить картинку на Рабочий стол", (s, e) => SaveDirect(Environment.GetFolderPath(Environment.SpecialFolder.Desktop))),
-                new MenuItem("Буфер обмена (Win+V)", (s, e) => ShowClipboardHistory(true)),
                 new MenuItem("Открыть папку кэша", (s, e) => {
                     string cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ShellIntegration.AppName, "Cache");
                     if (Directory.Exists(cache)) Process.Start("explorer.exe", cache);
                 }),
+                new MenuItem("Настройки и статус", (s, e) => ShowMainForm()),
                 autoRunItem,
                 new MenuItem("-"),
                 new MenuItem("Выход", (s, e) => ExitApp())
@@ -429,7 +498,10 @@ namespace PasteImageAsFile
                 {
                     if (Config.TrayClickOpensClipboard)
                     {
-                        ShowClipboardHistory(true);
+                        IntPtr prevFg = GetForegroundWindow();
+                        DesktopHelper.POINT curPt;
+                        DesktopHelper.TryGetCursorPosition(out curPt);
+                        ClipboardFlyoutForm.ShowFlyout(new Point(curPt.x, curPt.y), prevFg);
                     }
                     else
                     {

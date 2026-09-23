@@ -196,7 +196,7 @@ namespace PasteImageAsFile
                 ShellIntegration.SetHistoryMenuItem(chkShowHistoryMenu.Checked);
             };
 
-            chkTrayClickOpensClipboard = CreateCheckBox("Клик левой кнопкой по трею открывает буфер обмена", 18, chkTop + chkStep * 3);
+            chkTrayClickOpensClipboard = CreateCheckBox("Клик по иконке в трее открывает буфер обмена", 18, chkTop + chkStep * 3);
             chkTrayClickOpensClipboard.CheckedChanged += (s, e) => {
                 Config.TrayClickOpensClipboard = chkTrayClickOpensClipboard.Checked;
             };
