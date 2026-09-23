@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -19,6 +20,9 @@ namespace PasteImageAsFile
         [DllImport("user32.dll", ExactSpelling = true)]
         static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
 
+        [DllImport("user32.dll")]
+        static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
@@ -27,6 +31,9 @@ namespace PasteImageAsFile
 
         [DllImport("user32.dll", SetLastError = true)]
         static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT { public int Left, Top, Right, Bottom; }
 
         const uint GA_ROOT = 2;
 
@@ -181,31 +188,56 @@ namespace PasteImageAsFile
         {
             try
             {
+                DesktopHelper.POINT pt;
+                if (!DesktopHelper.TryGetCursorPosition(out pt)) return null;
+
+                Screen currentScreen = Screen.FromPoint(new Point(pt.x, pt.y));
                 IntPtr hwnd = IntPtr.Zero;
 
                 // 1. Приоритет: окно непосредственно под курсором мыши (на активном мониторе)
-                DesktopHelper.POINT pt;
-                if (DesktopHelper.TryGetCursorPosition(out pt))
+                IntPtr underCursor = WindowFromPoint(pt);
+                if (underCursor != IntPtr.Zero)
                 {
-                    IntPtr underCursor = WindowFromPoint(pt);
-                    if (underCursor != IntPtr.Zero)
+                    IntPtr root = GetAncestor(underCursor, GA_ROOT);
+                    IntPtr candidate = (root != IntPtr.Zero) ? root : underCursor;
+
+                    StringBuilder sbCls = new StringBuilder(64);
+                    GetClassName(candidate, sbCls, 64);
+                    string cls = sbCls.ToString();
+
+                    // Если под курсором рабочий стол или панель задач на текущем мониторе:
+                    // Значит на этом мониторе нет открытых сторонних окон - НЕ берем окна со второго экрана!
+                    if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd")
                     {
-                        IntPtr root = GetAncestor(underCursor, GA_ROOT);
-                        if (root != IntPtr.Zero && IsValidTargetWindow(root))
-                        {
-                            hwnd = root;
-                        }
-                        else if (IsValidTargetWindow(underCursor))
-                        {
-                            hwnd = underCursor;
-                        }
+                        Logger.Log("GetActiveWindowTitle: cursor is over desktop/taskbar on screen " + currentScreen.DeviceName + ", ignoring secondary screen windows");
+                        return null;
+                    }
+
+                    if (IsValidTargetWindow(candidate))
+                    {
+                        hwnd = candidate;
                     }
                 }
 
-                // 2. Если под курсором десктоп или панель задач, берем текущее активное окно
+                // 2. Если окно под курсором не определилось, проверяем GetForegroundWindow()
+                // ТОЛЬКО ЕСЛИ оно физически расположено на том же мониторе, где находится курсор!
                 if (hwnd == IntPtr.Zero)
                 {
-                    hwnd = GetForegroundWindow();
+                    IntPtr fg = GetForegroundWindow();
+                    if (fg != IntPtr.Zero && IsValidTargetWindow(fg))
+                    {
+                        RECT rc;
+                        GetWindowRect(fg, out rc);
+                        Rectangle winBounds = new Rectangle(rc.Left, rc.Top, Math.Max(1, rc.Right - rc.Left), Math.Max(1, rc.Bottom - rc.Top));
+                        if (currentScreen.Bounds.IntersectsWith(winBounds))
+                        {
+                            hwnd = fg;
+                        }
+                        else
+                        {
+                            Logger.Log("GetActiveWindowTitle: foreground window is on another screen, ignoring");
+                        }
+                    }
                 }
 
                 if (hwnd == IntPtr.Zero || !IsValidTargetWindow(hwnd)) return null;
