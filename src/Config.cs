@@ -55,6 +55,30 @@ namespace PasteImageAsFile
             set { SetString("DefaultPrefix", string.IsNullOrEmpty(value) ? "Снимок" : value); }
         }
 
+        public static bool HistoryRememberText
+        {
+            get { return GetDword("HistoryRememberText", 1) == 1; }
+            set { SetDword("HistoryRememberText", value ? 1 : 0); }
+        }
+
+        public static bool HistoryRememberFiles
+        {
+            get { return GetDword("HistoryRememberFiles", 1) == 1; }
+            set { SetDword("HistoryRememberFiles", value ? 1 : 0); }
+        }
+
+        public static int MaxHistoryItems
+        {
+            get { return GetDword("MaxHistoryItems", 50); }
+            set { SetDword("MaxHistoryItems", value); }
+        }
+
+        public static bool SuperHubFloatMode
+        {
+            get { return GetDword("SuperHubFloatMode", 0) == 1; }
+            set { SetDword("SuperHubFloatMode", value ? 1 : 0); }
+        }
+
         private static int GetDword(string name, int defaultValue)
         {
             try

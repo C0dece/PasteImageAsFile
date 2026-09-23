@@ -5,6 +5,7 @@ using System.Drawing.Imaging;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
 using System.Collections.Specialized;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace PasteImageAsFile
@@ -12,12 +13,32 @@ namespace PasteImageAsFile
     public class ClipboardListenerWindow : NativeWindow
     {
         const int WM_CLIPBOARDUPDATE = 0x031D;
+        public const int WM_SHOW_FLYOUT = 0x042A;
 
         [DllImport("user32.dll", SetLastError = true)]
         static extern bool AddClipboardFormatListener(IntPtr hwnd);
 
         [DllImport("user32.dll", SetLastError = true)]
         static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        static extern bool SetWindowText(IntPtr hWnd, string lpString);
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        static extern uint RegisterWindowMessage(string lpString);
+
+        public const string FLYOUT_MSG_NAME = "PasteImageAsFile_ShowFlyout_Message_v1";
+        public static readonly uint WM_SHOW_FLYOUT_MSG = RegisterWindowMessage(FLYOUT_MSG_NAME);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        public const string FlyoutEventName = "PasteImageAsFile_ShowFlyout_Event_v1";
+        private EventWaitHandle flyoutEvent;
+        private RegisteredWaitHandle registeredWait;
 
         public string CacheDirectory { get; private set; }
         private string lastAugmentedFile = null;
@@ -38,8 +59,26 @@ namespace PasteImageAsFile
             cp.Style = 0;
             cp.Parent = IntPtr.Zero;
             this.CreateHandle(cp);
+            SetWindowText(this.Handle, "PasteImageAsFileListenerWindow");
             bool ok = AddClipboardFormatListener(this.Handle);
             Logger.Log("ClipboardListenerWindow handle created: " + this.Handle + ", listener added: " + ok);
+
+            try
+            {
+                bool createdNew;
+                flyoutEvent = new EventWaitHandle(false, EventResetMode.AutoReset, FlyoutEventName, out createdNew);
+                registeredWait = ThreadPool.RegisterWaitForSingleObject(flyoutEvent, (state, timedOut) => {
+                    if (!timedOut)
+                    {
+                        PostMessage(this.Handle, unchecked((uint)WM_SHOW_FLYOUT), IntPtr.Zero, IntPtr.Zero);
+                    }
+                }, null, -1, false);
+                Logger.Log("Registered wait for " + FlyoutEventName);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("Error initializing flyoutEvent: " + ex.Message);
+            }
 
             InitDesktopWatcher();
 
@@ -97,6 +136,23 @@ namespace PasteImageAsFile
 
         protected override void WndProc(ref Message m)
         {
+            if (m.Msg == (int)WM_SHOW_FLYOUT_MSG || m.Msg == WM_SHOW_FLYOUT)
+            {
+                Logger.Log("WM_SHOW_FLYOUT message received");
+                try
+                {
+                    IntPtr prevFg = GetForegroundWindow();
+                    DesktopHelper.POINT curPt;
+                    DesktopHelper.TryGetCursorPosition(out curPt);
+                    ClipboardFlyoutForm.ShowFlyout(new Point(curPt.x, curPt.y), prevFg);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log("Error showing flyout from WM_SHOW_FLYOUT: " + ex.Message);
+                }
+                return;
+            }
+
             if (m.Msg == WM_CLIPBOARDUPDATE)
             {
                 // Debounce: подавление повторных событий после нашей же записи в буфер
@@ -155,6 +211,61 @@ namespace PasteImageAsFile
 
         private void OnClipboardUpdated()
         {
+            try
+            {
+                // 1. Проверяем наличие изображения в буфере
+                if (Clipboard.ContainsImage())
+                {
+                    HandleImageInClipboard();
+                    return;
+                }
+
+                // 2. Проверяем наличие скопированных файлов/папок
+                if (Clipboard.ContainsFileDropList() && Config.HistoryRememberFiles)
+                {
+                    var files = Clipboard.GetFileDropList();
+                    if (files != null && files.Count > 0)
+                    {
+                        if (files.Count == 1 && string.Equals(files[0], lastAugmentedFile, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return;
+                        }
+
+                        string winTitle = NameHelper.GetActiveWindowTitle() ?? "Проводник";
+                        var fileList = new List<string>();
+                        foreach (string f in files) fileList.Add(f);
+
+                        ClipboardHistoryManager.Instance.AddFiles(fileList, winTitle);
+                        Logger.Log("History: added " + fileList.Count + " files from " + winTitle);
+                        UpdateMenuStateForClipboard();
+                        return;
+                    }
+                }
+
+                // 3. Проверяем наличие текста
+                if (Clipboard.ContainsText() && Config.HistoryRememberText)
+                {
+                    string text = Clipboard.GetText();
+                    if (!string.IsNullOrEmpty(text) && text.Trim().Length > 0)
+                    {
+                        string winTitle = NameHelper.GetActiveWindowTitle() ?? "";
+                        ClipboardHistoryManager.Instance.AddText(text, winTitle);
+                        Logger.Log("History: added text snippet (" + text.Length + " chars) from " + winTitle);
+                        UpdateMenuStateForClipboard();
+                        return;
+                    }
+                }
+
+                UpdateMenuStateForClipboard();
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("OnClipboardUpdated error: " + ex.Message);
+            }
+        }
+
+        private void HandleImageInClipboard()
+        {
             Image img = null;
             IDataObject origData = null;
 
@@ -162,23 +273,13 @@ namespace PasteImageAsFile
             {
                 try
                 {
-                    if (!Clipboard.ContainsImage())
-                    {
-                        UpdateMenuStateForClipboard();
-                        return;
-                    }
-
                     if (Clipboard.ContainsFileDropList())
                     {
                         var files = Clipboard.GetFileDropList();
                         if (files.Count == 1 && string.Equals(files[0], lastAugmentedFile, StringComparison.OrdinalIgnoreCase))
                         {
-                            // Это наш собственный аугментированный файл
                             return;
                         }
-                        // Файл скопирован пользователем в Проводнике
-                        UpdateMenuStateForClipboard();
-                        return;
                     }
 
                     origData = Clipboard.GetDataObject();
@@ -211,7 +312,12 @@ namespace PasteImageAsFile
                 }
 
                 img.Save(tempFilePath, ImageFormat.Png);
+                long fSize = 0;
+                try { fSize = new FileInfo(tempFilePath).Length; } catch {}
                 Logger.Log("Saved cache image: " + tempFilePath);
+
+                // Добавляем в менеджер истории
+                ClipboardHistoryManager.Instance.AddImage(tempFilePath, bestName, img.Width, img.Height, fSize);
 
                 DataObject aug = new DataObject();
                 foreach (string fmt in origData.GetFormats())
@@ -238,7 +344,6 @@ namespace PasteImageAsFile
                 Clipboard.SetDataObject(aug, true);
                 Logger.Log("Augmented clipboard with: " + tempFilePath);
 
-                // В буфере сейчас готовая картинка для Ctrl+V -> пункт меню "Вставить изображение" не нужен
                 ShellIntegration.SetImagePasteMenuItem(false);
             }
             catch (Exception ex)
@@ -308,6 +413,16 @@ namespace PasteImageAsFile
                     desktopWatcher = null;
                 }
                 catch {}
+            }
+            if (registeredWait != null)
+            {
+                try { registeredWait.Unregister(null); } catch {}
+                registeredWait = null;
+            }
+            if (flyoutEvent != null)
+            {
+                try { flyoutEvent.Close(); } catch {}
+                flyoutEvent = null;
             }
             RemoveClipboardFormatListener(this.Handle);
             this.DestroyHandle();

@@ -7,3 +7,4 @@ obj/
 *.exe
 !dist/PasteImageAsFile.exe
 !dist/app.ico
+scratch/

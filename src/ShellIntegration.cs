@@ -12,7 +12,7 @@ namespace PasteImageAsFile
         public const string AppName = "PasteImageAsFile";
         public const string MenuText = "Вставить изображение из буфера";
         public const string HistoryMenuText = "Буфер обмена";
-        public const string AppVersion = "1.5.1";
+        public const string AppVersion = "1.6.0";
 
         [DllImport("shell32.dll")]
         public static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);

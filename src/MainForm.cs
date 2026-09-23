@@ -41,6 +41,8 @@ namespace PasteImageAsFile
         private CheckBox chkClassicContextMenuWin11;
         private CheckBox chkPlaceUnderCursor;
         private CheckBox chkExtractOriginalName;
+        private CheckBox chkHistoryRememberText;
+        private CheckBox chkHistoryRememberFiles;
         private Label lblPrefix;
         private TextBox txtPrefix;
 
@@ -67,9 +69,9 @@ namespace PasteImageAsFile
             this.SuspendLayout();
 
             this.Text = "PasteImageAsFile";
-            this.Size = new Size(500, 645);
-            this.MinimumSize = new Size(500, 645);
-            this.MaximumSize = new Size(500, 645);
+            this.Size = new Size(500, 710);
+            this.MinimumSize = new Size(500, 710);
+            this.MaximumSize = new Size(500, 710);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
@@ -168,7 +170,7 @@ namespace PasteImageAsFile
             pnlCardInstall.Controls.Add(btnUninstall);
 
             // --- Settings Card ---
-            pnlCardSettings = CreateCard(20, 262, 444, 280);
+            pnlCardSettings = CreateCard(20, 262, 444, 335);
 
             Label lblSettingsTitle = new Label();
             lblSettingsTitle.Text = "Настройки";
@@ -213,14 +215,20 @@ namespace PasteImageAsFile
             chkExtractOriginalName = CreateCheckBox("Извлекать имя картинки везде где возможно", 18, chkTop + chkStep * 6);
             chkExtractOriginalName.CheckedChanged += (s, e) => { Config.ExtractOriginalName = chkExtractOriginalName.Checked; };
 
+            chkHistoryRememberText = CreateCheckBox("Сохранять скопированный текст в буфер", 18, chkTop + chkStep * 7);
+            chkHistoryRememberText.CheckedChanged += (s, e) => { Config.HistoryRememberText = chkHistoryRememberText.Checked; };
+
+            chkHistoryRememberFiles = CreateCheckBox("Сохранять скопированные файлы в буфер", 18, chkTop + chkStep * 8);
+            chkHistoryRememberFiles.CheckedChanged += (s, e) => { Config.HistoryRememberFiles = chkHistoryRememberFiles.Checked; };
+
             lblPrefix = new Label();
             lblPrefix.Text = "Префикс по умолчанию:";
             lblPrefix.ForeColor = TextSecondary;
             lblPrefix.AutoSize = true;
-            lblPrefix.Location = new Point(18, chkTop + chkStep * 7 + 4);
+            lblPrefix.Location = new Point(18, chkTop + chkStep * 9 + 4);
 
             txtPrefix = new TextBox();
-            txtPrefix.Location = new Point(195, chkTop + chkStep * 7 + 1);
+            txtPrefix.Location = new Point(195, chkTop + chkStep * 9 + 1);
             txtPrefix.Size = new Size(160, 24);
             txtPrefix.BorderStyle = BorderStyle.FixedSingle;
             txtPrefix.Font = new Font("Segoe UI", 9.5f);
@@ -234,12 +242,14 @@ namespace PasteImageAsFile
             pnlCardSettings.Controls.Add(chkClassicContextMenuWin11);
             pnlCardSettings.Controls.Add(chkPlaceUnderCursor);
             pnlCardSettings.Controls.Add(chkExtractOriginalName);
+            pnlCardSettings.Controls.Add(chkHistoryRememberText);
+            pnlCardSettings.Controls.Add(chkHistoryRememberFiles);
             pnlCardSettings.Controls.Add(lblPrefix);
             pnlCardSettings.Controls.Add(txtPrefix);
 
             // --- Footer ---
             pnlFooter = new Panel();
-            pnlFooter.Location = new Point(20, 552);
+            pnlFooter.Location = new Point(20, 612);
             pnlFooter.Size = new Size(444, 40);
             pnlFooter.BackColor = Color.Transparent;
 
@@ -351,6 +361,8 @@ namespace PasteImageAsFile
             chkClassicContextMenuWin11.Checked = Config.ClassicContextMenuWin11 || ShellIntegration.IsClassicContextMenuWin11Enabled();
             chkPlaceUnderCursor.Checked = Config.PlaceUnderCursor;
             chkExtractOriginalName.Checked = Config.ExtractOriginalName;
+            chkHistoryRememberText.Checked = Config.HistoryRememberText;
+            chkHistoryRememberFiles.Checked = Config.HistoryRememberFiles;
             txtPrefix.Text = Config.DefaultPrefix;
         }
 

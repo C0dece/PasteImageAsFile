@@ -96,6 +96,9 @@ namespace PasteImageAsFile
         [DllImport("user32.dll")]
         static extern bool AllowSetForegroundWindow(int dwProcessId);
 
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        static extern uint RegisterWindowMessage(string lpString);
+
         const uint GA_ROOT = 2;
         const int ASFW_ANY = -1;
 
@@ -250,9 +253,53 @@ namespace PasteImageAsFile
 
         public static void ShowClipboardHistory(bool fromTray = false)
         {
+            Logger.Log("ShowClipboardHistory invoked (fromTray=" + fromTray + ")");
+            try
+            {
+                // Если мы уже внутри работающего демона или формы:
+                if (watcherWindow != null || (mainForm != null && !mainForm.IsDisposed))
+                {
+                    DesktopHelper.POINT curPt;
+                    DesktopHelper.TryGetCursorPosition(out curPt);
+                    IntPtr prevFg = GetForegroundWindow();
+                    ClipboardFlyoutForm.ShowFlyout(new Point(curPt.x, curPt.y), prevFg);
+                    return;
+                }
+
+                // Иначе мы вызваны из контекстного меню Проводника или CLI:
+                // Пытаемся разбудить работающий демон через именованный Event
+                try
+                {
+                    using (var ev = EventWaitHandle.OpenExisting(ClipboardListenerWindow.FlyoutEventName))
+                    {
+                        ev.Set();
+                        Logger.Log("Signaled " + ClipboardListenerWindow.FlyoutEventName + " successfully");
+                        return;
+                    }
+                }
+                catch (WaitHandleCannotBeOpenedException) {}
+                catch (Exception exSignal)
+                {
+                    Logger.Log("Event open failed: " + exSignal.Message);
+                }
+
+                DesktopHelper.POINT pt;
+                DesktopHelper.TryGetCursorPosition(out pt);
+                IntPtr fg = GetForegroundWindow();
+                ClipboardFlyoutForm.ShowFlyout(new Point(pt.x, pt.y), fg);
+                Application.Run();
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("ShowClipboardHistory error: " + ex.ToString());
+            }
+        }
+
+        public static void SendNativeWinV(bool fromTray = false)
+        {
             if (Interlocked.CompareExchange(ref isShowingHistory, 1, 0) != 0)
             {
-                Logger.Log("ShowClipboardHistory: already in progress, debounced");
+                Logger.Log("SendNativeWinV: already in progress, debounced");
                 return;
             }
 
@@ -260,7 +307,7 @@ namespace PasteImageAsFile
             DesktopHelper.TryGetCursorPosition(out pt);
             Screen targetScreen = Screen.FromPoint(new Point(pt.x, pt.y));
 
-            Logger.Log("ShowClipboardHistory invoked (fromTray=" + fromTray + ") cursor: " + pt.x + "," + pt.y + " targetScreen: " + targetScreen.DeviceName);
+            Logger.Log("SendNativeWinV invoked (fromTray=" + fromTray + ") cursor: " + pt.x + "," + pt.y + " targetScreen: " + targetScreen.DeviceName);
 
             ThreadPool.QueueUserWorkItem(_ => {
                 try
@@ -276,9 +323,6 @@ namespace PasteImageAsFile
                     }
                     else
                     {
-                        // Если на экране нет открытых окон пользователя, создаем временную якорную форму
-                        // на целевом экране, чтобы системный буфер открылся на целевом мониторе, и НЕ закрываем
-                        // ее сразу (чтобы TextInputHost успел инициализироваться и не сбросился)
                         try
                         {
                             Action createAnchor = () => {
@@ -329,7 +373,6 @@ namespace PasteImageAsFile
                     keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
                     Logger.Log("Sent Win+V successfully to " + targetScreen.DeviceName);
 
-                    // Если создавали якорную форму, оставляем ее на 3 секунды, затем плавно освобождаем
                     if (winVAnchor != null)
                     {
                         Thread.Sleep(3000);
@@ -362,7 +405,7 @@ namespace PasteImageAsFile
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("ShowClipboardHistory error: " + ex.Message);
+                    Logger.Log("SendNativeWinV error: " + ex.Message);
                 }
                 finally
                 {
@@ -450,13 +493,8 @@ namespace PasteImageAsFile
             autoRunItem.Checked = Config.AutoRun;
 
             ContextMenu menu = new ContextMenu(new MenuItem[] {
-                new MenuItem("Буфер обмена (из трея)", (s, e) => {
-                    IntPtr prevFg = GetForegroundWindow();
-                    DesktopHelper.POINT curPt;
-                    DesktopHelper.TryGetCursorPosition(out curPt);
-                    ClipboardFlyoutForm.ShowFlyout(new Point(curPt.x, curPt.y), prevFg);
-                }),
-                new MenuItem("Системный буфер (Win+V)", (s, e) => ShowClipboardHistory(true)),
+                new MenuItem("Буфер обмена", (s, e) => ShowClipboardHistory(true)),
+                new MenuItem("Системный буфер (Win+V)", (s, e) => SendNativeWinV(true)),
                 new MenuItem("-"),
                 new MenuItem("Сохранить картинку на Рабочий стол", (s, e) => SaveDirect(Environment.GetFolderPath(Environment.SpecialFolder.Desktop))),
                 new MenuItem("Открыть папку кэша", (s, e) => {
