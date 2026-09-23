@@ -17,23 +17,29 @@ namespace PasteImageAsFile
             this.FormBorderStyle = FormBorderStyle.None;
             this.ShowInTaskbar = false;
             this.StartPosition = FormStartPosition.Manual;
-            this.Size = new Size(16, 24);
-            this.Opacity = 0.01;
+            this.Size = new Size(2, 2);
             this.TopMost = true;
+            this.BackColor = Color.Magenta;
+            this.TransparencyKey = Color.Magenta;
 
             txtAnchor = new TextBox
             {
                 Location = new Point(0, 0),
-                Size = new Size(16, 24),
+                Size = new Size(2, 2),
                 BorderStyle = BorderStyle.None
             };
             this.Controls.Add(txtAnchor);
         }
 
+        protected override bool ShowWithoutActivation
+        {
+            get { return false; }
+        }
+
         public void PositionAndFocus(int x, int y)
         {
             this.Location = new Point(x, y);
-            this.Show();
+            if (!this.Visible) this.Show();
             this.BringToFront();
             this.Activate();
             txtAnchor.Focus();
@@ -90,7 +96,15 @@ namespace PasteImageAsFile
         const uint KEYEVENTF_KEYUP = 0x0002;
         const uint SWP_NOSIZE = 0x0001;
         const uint SWP_NOZORDER = 0x0004;
+        const uint SWP_NOACTIVATE = 0x0010;
         const uint SWP_SHOWWINDOW = 0x0040;
+        const uint WM_NULL = 0x0000;
+
+        private static int isShowingHistory = 0;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
         [DllImport("user32.dll")]
         static extern IntPtr GetForegroundWindow();
 
@@ -148,6 +162,7 @@ namespace PasteImageAsFile
                 if (cmd == "--history" || cmd == "-h" || cmd == "--clipboard" || cmd == "-v")
                 {
                     ShowClipboardHistory();
+                    Thread.Sleep(600);
                     return;
                 }
                 if (cmd == "--save" || cmd == "-s")
@@ -264,153 +279,186 @@ namespace PasteImageAsFile
 
         public static void ShowClipboardHistory(bool fromTray = false)
         {
-            Logger.Log("ShowClipboardHistory invoked (fromTray=" + fromTray + ")");
-
-            DesktopHelper.POINT pt;
-            DesktopHelper.TryGetCursorPosition(out pt);
-            Logger.Log("ShowClipboardHistory: target cursor point: " + pt.x + "," + pt.y);
-
-            Screen targetScreen = Screen.FromPoint(new Point(pt.x, pt.y));
-            Logger.Log("ShowClipboardHistory: target screen: " + targetScreen.DeviceName + " bounds: " + targetScreen.Bounds + " workingArea: " + targetScreen.WorkingArea);
-
-            IntPtr targetWin = WindowFromPoint(pt);
-            IntPtr root = (targetWin != IntPtr.Zero) ? GetAncestor(targetWin, GA_ROOT) : IntPtr.Zero;
-            IntPtr underCursor = (root != IntPtr.Zero) ? root : targetWin;
-
-            bool isOverTaskbar = IsTaskbarOrTrayWindow(underCursor) || fromTray;
-
-            int anchorX, anchorY;
-            if (isOverTaskbar)
+            if (Interlocked.CompareExchange(ref isShowingHistory, 1, 0) != 0)
             {
-                // При клике в трей позиционируем в правом верхнем углу (или нижнем, если панель снизу)
-                anchorX = targetScreen.WorkingArea.Right - 380;
-                if (targetScreen.WorkingArea.Top > targetScreen.Bounds.Top)
+                Logger.Log("ShowClipboardHistory: already in progress, debounced");
+                return;
+            }
+
+            try
+            {
+                Logger.Log("ShowClipboardHistory invoked (fromTray=" + fromTray + ")");
+
+                DesktopHelper.POINT pt;
+                DesktopHelper.TryGetCursorPosition(out pt);
+                Logger.Log("ShowClipboardHistory: target cursor point: " + pt.x + "," + pt.y);
+
+                Screen targetScreen = Screen.FromPoint(new Point(pt.x, pt.y));
+                Logger.Log("ShowClipboardHistory: target screen: " + targetScreen.DeviceName + " bounds: " + targetScreen.Bounds + " workingArea: " + targetScreen.WorkingArea);
+
+                IntPtr targetWin = WindowFromPoint(pt);
+                IntPtr root = (targetWin != IntPtr.Zero) ? GetAncestor(targetWin, GA_ROOT) : IntPtr.Zero;
+                IntPtr underCursor = (root != IntPtr.Zero) ? root : targetWin;
+
+                bool isOverTaskbar = IsTaskbarOrTrayWindow(underCursor) || fromTray;
+
+                int effW = 360;
+                int effH = 520;
+                int anchorX, anchorY;
+
+                if (isOverTaskbar)
                 {
-                    // Панель задач ВВЕРХУ экрана (как в системе пользователя)
-                    anchorY = targetScreen.WorkingArea.Top + 6;
+                    // При клике в трей позиционируем в правом углу нужного монитора (как Центр управления)
+                    anchorX = targetScreen.WorkingArea.Right - effW - 12;
+                    if (targetScreen.WorkingArea.Top > targetScreen.Bounds.Top)
+                    {
+                        // Панель задач ВВЕРХУ экрана (как у пользователя)
+                        anchorY = targetScreen.WorkingArea.Top + 6;
+                    }
+                    else
+                    {
+                        // Панель задач ВНИЗУ экрана
+                        anchorY = targetScreen.WorkingArea.Bottom - effH - 6;
+                    }
                 }
                 else
                 {
-                    // Панель задач ВНИЗУ экрана
-                    anchorY = targetScreen.WorkingArea.Bottom - 30;
+                    // При клике в папке или на рабочем столе: у курсора мыши
+                    anchorX = pt.x + 8;
+                    anchorY = pt.y + 8;
+                    if (anchorX + effW > targetScreen.WorkingArea.Right) anchorX = pt.x - effW - 8;
+                    if (anchorY + effH > targetScreen.WorkingArea.Bottom) anchorY = pt.y - effH - 8;
+                    if (anchorX < targetScreen.WorkingArea.Left) anchorX = targetScreen.WorkingArea.Left + 8;
+                    if (anchorY < targetScreen.WorkingArea.Top) anchorY = targetScreen.WorkingArea.Top + 8;
                 }
-            }
-            else
-            {
-                // При клике в папке или на рабочем столе: точно в точке курсора
-                anchorX = pt.x;
-                anchorY = pt.y;
-            }
 
-            // Активируем микро-окно якоря на целевом мониторе, задавая системную каретку Windows 11
-            try
-            {
-                if (anchorForm == null || anchorForm.IsDisposed)
+                // Активируем микро-окно якоря на целевом мониторе, задавая системную каретку Windows 11
+                try
                 {
-                    anchorForm = new AnchorForm();
+                    if (anchorForm == null || anchorForm.IsDisposed)
+                    {
+                        anchorForm = new AnchorForm();
+                    }
+                    anchorForm.PositionAndFocus(anchorX, anchorY);
+                    ForceForegroundWindow(anchorForm.Handle);
+                    PostMessage(anchorForm.Handle, WM_NULL, IntPtr.Zero, IntPtr.Zero);
+                    Logger.Log("AnchorForm focused at " + anchorX + "," + anchorY + " on " + targetScreen.DeviceName);
                 }
-                anchorForm.PositionAndFocus(anchorX, anchorY);
-                ForceForegroundWindow(anchorForm.Handle);
-                Logger.Log("AnchorForm focused at " + anchorX + "," + anchorY + " on " + targetScreen.DeviceName);
-            }
-            catch (Exception ex)
-            {
-                Logger.Log("AnchorForm focus error: " + ex.Message);
-            }
-
-            Thread.Sleep(60);
-
-            // Отправляем Win+V
-            keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
-            keybd_event(VK_V, 0, 0, UIntPtr.Zero);
-            Thread.Sleep(20);
-            keybd_event(VK_V, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-            keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-
-            // Прячем якорь через 500 мс после открытия меню
-            System.Windows.Forms.Timer hideTimer = new System.Windows.Forms.Timer();
-            hideTimer.Interval = 500;
-            hideTimer.Tick += (s, e) => {
-                hideTimer.Stop();
-                hideTimer.Dispose();
-                try { if (anchorForm != null && !anchorForm.IsDisposed) anchorForm.Hide(); } catch {}
-            };
-            hideTimer.Start();
-
-            // Мониторинг появления окна TextInputHost и удержание на целевом мониторе
-            ThreadPool.QueueUserWorkItem(_ => {
-                for (int i = 0; i < 20; i++)
+                catch (Exception ex)
                 {
-                    Thread.Sleep(30);
-                    IntPtr foundHwnd = IntPtr.Zero;
+                    Logger.Log("AnchorForm focus error: " + ex.Message);
+                }
 
-                    EnumWindows((hwnd, lParam) => {
-                        if (!IsWindowVisible(hwnd)) return true;
-                        uint pid;
-                        GetWindowThreadProcessId(hwnd, out pid);
-                        try
+                Thread.Sleep(50);
+
+                // Отправляем Win+V
+                keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
+                keybd_event(VK_V, 0, 0, UIntPtr.Zero);
+                Thread.Sleep(20);
+                keybd_event(VK_V, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+                // Однократный мониторинг окна TextInputHost (без зацикливания и без спама!)
+                ThreadPool.QueueUserWorkItem(_ => {
+                    try
+                    {
+                        for (int i = 0; i < 15; i++)
                         {
-                            var proc = Process.GetProcessById((int)pid);
-                            string pName = proc.ProcessName.ToLowerInvariant();
-                            if (pName == "textinputhost" || pName == "shellexperiencehost")
+                            Thread.Sleep(40);
+                            IntPtr foundHwnd = IntPtr.Zero;
+
+                            EnumWindows((hwnd, lParam) => {
+                                if (!IsWindowVisible(hwnd)) return true;
+                                uint pid;
+                                GetWindowThreadProcessId(hwnd, out pid);
+                                try
+                                {
+                                    var proc = Process.GetProcessById((int)pid);
+                                    string pName = proc.ProcessName.ToLowerInvariant();
+                                    if (pName == "textinputhost" || pName == "shellexperiencehost")
+                                    {
+                                        RECT rc;
+                                        GetWindowRect(hwnd, out rc);
+                                        int w = rc.Right - rc.Left;
+                                        int h = rc.Bottom - rc.Top;
+
+                                        if (w > 180 && h > 180)
+                                        {
+                                            foundHwnd = hwnd;
+                                            return false;
+                                        }
+                                    }
+                                }
+                                catch {}
+                                return true;
+                            }, IntPtr.Zero);
+
+                            if (foundHwnd != IntPtr.Zero)
                             {
                                 RECT rc;
-                                GetWindowRect(hwnd, out rc);
-                                int w = rc.Right - rc.Left;
-                                int h = rc.Bottom - rc.Top;
+                                GetWindowRect(foundHwnd, out rc);
+                                int rawW = rc.Right - rc.Left;
+                                int rawH = rc.Bottom - rc.Top;
+                                int winW = (rawW > 600 || rawW < 100) ? 360 : rawW;
+                                int winH = (rawH > 800 || rawH < 100) ? 520 : rawH;
 
-                                if (w > 180 && h > 180)
+                                int targetX, targetY;
+                                if (isOverTaskbar)
                                 {
-                                    foundHwnd = hwnd;
-                                    return false;
+                                    targetX = targetScreen.WorkingArea.Right - winW - 12;
+                                    if (targetScreen.WorkingArea.Top > targetScreen.Bounds.Top)
+                                    {
+                                        targetY = targetScreen.WorkingArea.Top + 6;
+                                    }
+                                    else
+                                    {
+                                        targetY = targetScreen.WorkingArea.Bottom - winH - 6;
+                                    }
                                 }
+                                else
+                                {
+                                    targetX = pt.x + 8;
+                                    targetY = pt.y + 8;
+                                    if (targetX + winW > targetScreen.WorkingArea.Right) targetX = pt.x - winW - 8;
+                                    if (targetY + winH > targetScreen.WorkingArea.Bottom) targetY = pt.y - winH - 8;
+                                    if (targetX < targetScreen.WorkingArea.Left) targetX = targetScreen.WorkingArea.Left + 8;
+                                    if (targetY < targetScreen.WorkingArea.Top) targetY = targetScreen.WorkingArea.Top + 8;
+                                }
+
+                                // Если окно открылось на чужом мониторе или смещено, корректируем его положение РОВНО ОДИН РАЗ
+                                if (Math.Abs(rc.Left - targetX) > 40 || Math.Abs(rc.Top - targetY) > 40)
+                                {
+                                    SetWindowPos(foundHwnd, IntPtr.Zero, targetX, targetY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                                    Logger.Log("Repositioned TextInputHost once to " + targetX + "," + targetY + " on screen " + targetScreen.DeviceName);
+                                }
+                                break; // ВЫХОДИМ СРАЗУ, НИКАКОГО ПОВТОРНОГО СПАМА
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Log("Reposition error: " + ex.Message);
+                    }
+                    finally
+                    {
+                        Thread.Sleep(300);
+                        try
+                        {
+                            if (anchorForm != null && !anchorForm.IsDisposed)
+                            {
+                                anchorForm.BeginInvoke(new Action(() => anchorForm.Hide()));
                             }
                         }
                         catch {}
-                        return true;
-                    }, IntPtr.Zero);
-
-                    if (foundHwnd != IntPtr.Zero)
-                    {
-                        RECT rc;
-                        GetWindowRect(foundHwnd, out rc);
-                        int rawW = rc.Right - rc.Left;
-                        int rawH = rc.Bottom - rc.Top;
-                        int effW = (rawW > 600 || rawW < 100) ? 360 : rawW;
-                        int effH = (rawH > 800 || rawH < 100) ? 520 : rawH;
-
-                        int targetX, targetY;
-                        if (isOverTaskbar)
-                        {
-                            targetX = targetScreen.WorkingArea.Right - effW - 12;
-                            if (targetScreen.WorkingArea.Top > targetScreen.Bounds.Top)
-                            {
-                                targetY = targetScreen.WorkingArea.Top + 6;
-                            }
-                            else
-                            {
-                                targetY = targetScreen.WorkingArea.Bottom - effH - 6;
-                            }
-                        }
-                        else
-                        {
-                            targetX = pt.x + 8;
-                            targetY = pt.y + 8;
-                            if (targetX + effW > targetScreen.WorkingArea.Right) targetX = pt.x - effW - 8;
-                            if (targetY + effH > targetScreen.WorkingArea.Bottom) targetY = pt.y - effH - 8;
-                            if (targetX < targetScreen.WorkingArea.Left) targetX = targetScreen.WorkingArea.Left + 8;
-                            if (targetY < targetScreen.WorkingArea.Top) targetY = targetScreen.WorkingArea.Top + 8;
-                        }
-
-                        // Если окно открылось на чужом мониторе или смещено, корректируем его положение
-                        if (Math.Abs(rc.Left - targetX) > 40 || Math.Abs(rc.Top - targetY) > 40)
-                        {
-                            SetWindowPos(foundHwnd, IntPtr.Zero, targetX, targetY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
-                            Logger.Log("Repositioned TextInputHost to " + targetX + "," + targetY + " on screen " + targetScreen.DeviceName);
-                        }
+                        Interlocked.Exchange(ref isShowingHistory, 0);
                     }
-                }
-            });
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("ShowClipboardHistory error: " + ex.Message);
+                Interlocked.Exchange(ref isShowingHistory, 0);
+            }
         }
 
         private static void RunDaemonMode()
