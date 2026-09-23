@@ -6,9 +6,40 @@ using System.Windows.Forms;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Diagnostics;
-
 namespace PasteImageAsFile
 {
+    public class AnchorForm : Form
+    {
+        private TextBox txtAnchor;
+
+        public AnchorForm()
+        {
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.ShowInTaskbar = false;
+            this.StartPosition = FormStartPosition.Manual;
+            this.Size = new Size(16, 24);
+            this.Opacity = 0.01;
+            this.TopMost = true;
+
+            txtAnchor = new TextBox
+            {
+                Location = new Point(0, 0),
+                Size = new Size(16, 24),
+                BorderStyle = BorderStyle.None
+            };
+            this.Controls.Add(txtAnchor);
+        }
+
+        public void PositionAndFocus(int x, int y)
+        {
+            this.Location = new Point(x, y);
+            this.Show();
+            this.BringToFront();
+            this.Activate();
+            txtAnchor.Focus();
+        }
+    }
+
     public static class Program
     {
         const string MutexName = "PasteImageAsFile_SingleInstance_Mutex_App_v1";
@@ -17,6 +48,7 @@ namespace PasteImageAsFile
         private static ClipboardListenerWindow watcherWindow;
         private static NotifyIcon trayIcon;
         private static MainForm mainForm;
+        private static AnchorForm anchorForm;
 
         [DllImport("user32.dll")]
         static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
@@ -247,46 +279,46 @@ namespace PasteImageAsFile
 
             bool isOverTaskbar = IsTaskbarOrTrayWindow(underCursor) || fromTray;
 
-            // Определяем, какое окно активировать, чтобы:
-            // 1. Снять фокус с трея/панели задач
-            // 2. НЕ активировать окна с ДРУГОГО монитора
-            try
+            int anchorX, anchorY;
+            if (isOverTaskbar)
             {
-                if (!isOverTaskbar && underCursor != IntPtr.Zero)
+                // При клике в трей позиционируем в правом верхнем углу (или нижнем, если панель снизу)
+                anchorX = targetScreen.WorkingArea.Right - 380;
+                if (targetScreen.WorkingArea.Top > targetScreen.Bounds.Top)
                 {
-                    // Клик в контекстном меню папки проводника на рабочем мониторе
-                    Logger.Log("Activating under-cursor window: " + underCursor);
-                    ForceForegroundWindow(underCursor);
+                    // Панель задач ВВЕРХУ экрана (как в системе пользователя)
+                    anchorY = targetScreen.WorkingArea.Top + 6;
                 }
                 else
                 {
-                    // Клик был по иконке в трее или на панели задач:
-                    // Ищем окно пользователя СТРОГО НА ЭТОМ ЖЕ МОНИТОРЕ
-                    IntPtr userWin = FindLastActiveUserWindowOnScreen(targetScreen);
-                    if (userWin != IntPtr.Zero)
-                    {
-                        Logger.Log("Unfocusing tray: transferring focus to user window on same screen: " + userWin);
-                        ForceForegroundWindow(userWin);
-                    }
-                    else
-                    {
-                        // Если на этом мониторе нет сторонних окон (только рабочий стол):
-                        // Активируем Рабочий стол (Progman)
-                        IntPtr progman = FindWindow("Progman", null);
-                        if (progman != IntPtr.Zero)
-                        {
-                            Logger.Log("Unfocusing tray: transferring focus to Progman");
-                            ForceForegroundWindow(progman);
-                        }
-                    }
+                    // Панель задач ВНИЗУ экрана
+                    anchorY = targetScreen.WorkingArea.Bottom - 30;
                 }
+            }
+            else
+            {
+                // При клике в папке или на рабочем столе: точно в точке курсора
+                anchorX = pt.x;
+                anchorY = pt.y;
+            }
+
+            // Активируем микро-окно якоря на целевом мониторе, задавая системную каретку Windows 11
+            try
+            {
+                if (anchorForm == null || anchorForm.IsDisposed)
+                {
+                    anchorForm = new AnchorForm();
+                }
+                anchorForm.PositionAndFocus(anchorX, anchorY);
+                ForceForegroundWindow(anchorForm.Handle);
+                Logger.Log("AnchorForm focused at " + anchorX + "," + anchorY + " on " + targetScreen.DeviceName);
             }
             catch (Exception ex)
             {
-                Logger.Log("ShowClipboardHistory focus error: " + ex.Message);
+                Logger.Log("AnchorForm focus error: " + ex.Message);
             }
 
-            Thread.Sleep(80);
+            Thread.Sleep(60);
 
             // Отправляем Win+V
             keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
@@ -295,87 +327,90 @@ namespace PasteImageAsFile
             keybd_event(VK_V, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
             keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
 
-            // Отслеживаем появление окна истории буфера обмена и смещаем его на нужный монитор и позицию
-            for (int i = 0; i < 25; i++)
-            {
-                Thread.Sleep(40);
-                IntPtr foundHwnd = IntPtr.Zero;
+            // Прячем якорь через 500 мс после открытия меню
+            System.Windows.Forms.Timer hideTimer = new System.Windows.Forms.Timer();
+            hideTimer.Interval = 500;
+            hideTimer.Tick += (s, e) => {
+                hideTimer.Stop();
+                hideTimer.Dispose();
+                try { if (anchorForm != null && !anchorForm.IsDisposed) anchorForm.Hide(); } catch {}
+            };
+            hideTimer.Start();
 
-                EnumWindows((hwnd, lParam) => {
-                    if (!IsWindowVisible(hwnd)) return true;
-                    uint pid;
-                    GetWindowThreadProcessId(hwnd, out pid);
-                    try
-                    {
-                        var proc = Process.GetProcessById((int)pid);
-                        string pName = proc.ProcessName.ToLowerInvariant();
-                        if (pName == "textinputhost" || pName == "shellexperiencehost")
+            // Мониторинг появления окна TextInputHost и удержание на целевом мониторе
+            ThreadPool.QueueUserWorkItem(_ => {
+                for (int i = 0; i < 20; i++)
+                {
+                    Thread.Sleep(30);
+                    IntPtr foundHwnd = IntPtr.Zero;
+
+                    EnumWindows((hwnd, lParam) => {
+                        if (!IsWindowVisible(hwnd)) return true;
+                        uint pid;
+                        GetWindowThreadProcessId(hwnd, out pid);
+                        try
                         {
-                            var sbClass = new System.Text.StringBuilder(256);
-                            GetClassName(hwnd, sbClass, 256);
-                            string cls = sbClass.ToString();
-
-                            RECT rc;
-                            GetWindowRect(hwnd, out rc);
-                            int w = rc.Right - rc.Left;
-                            int h = rc.Bottom - rc.Top;
-
-                            if (w > 180 && h > 180)
+                            var proc = Process.GetProcessById((int)pid);
+                            string pName = proc.ProcessName.ToLowerInvariant();
+                            if (pName == "textinputhost" || pName == "shellexperiencehost")
                             {
-                                foundHwnd = hwnd;
-                                return false;
+                                RECT rc;
+                                GetWindowRect(hwnd, out rc);
+                                int w = rc.Right - rc.Left;
+                                int h = rc.Bottom - rc.Top;
+
+                                if (w > 180 && h > 180)
+                                {
+                                    foundHwnd = hwnd;
+                                    return false;
+                                }
                             }
                         }
-                    }
-                    catch {}
-                    return true;
-                }, IntPtr.Zero);
+                        catch {}
+                        return true;
+                    }, IntPtr.Zero);
 
-                if (foundHwnd != IntPtr.Zero)
-                {
-                    RECT rc;
-                    GetWindowRect(foundHwnd, out rc);
-                    int rawW = rc.Right - rc.Left;
-                    int rawH = rc.Bottom - rc.Top;
-
-                    int effW = (rawW > 600 || rawW < 100) ? 360 : rawW;
-                    int effH = (rawH > 800 || rawH < 100) ? 520 : rawH;
-
-                    int targetX, targetY;
-
-                    if (isOverTaskbar)
+                    if (foundHwnd != IntPtr.Zero)
                     {
-                        // Режим вылезания из трея (как системный Центр управления Windows / Action Center):
-                        // Прижимаем к правому краю монитора с отступом 12px
-                        targetX = targetScreen.WorkingArea.Right - effW - 12;
+                        RECT rc;
+                        GetWindowRect(foundHwnd, out rc);
+                        int rawW = rc.Right - rc.Left;
+                        int rawH = rc.Bottom - rc.Top;
+                        int effW = (rawW > 600 || rawW < 100) ? 360 : rawW;
+                        int effH = (rawH > 800 || rawH < 100) ? 520 : rawH;
 
-                        if (targetScreen.WorkingArea.Top > targetScreen.Bounds.Top)
+                        int targetX, targetY;
+                        if (isOverTaskbar)
                         {
-                            // Панель задач ВВЕРХУ экрана (как в системе пользователя)
-                            targetY = targetScreen.WorkingArea.Top + 6;
+                            targetX = targetScreen.WorkingArea.Right - effW - 12;
+                            if (targetScreen.WorkingArea.Top > targetScreen.Bounds.Top)
+                            {
+                                targetY = targetScreen.WorkingArea.Top + 6;
+                            }
+                            else
+                            {
+                                targetY = targetScreen.WorkingArea.Bottom - effH - 6;
+                            }
                         }
                         else
                         {
-                            // Панель задач ВНИЗУ экрана (стандартно)
-                            targetY = targetScreen.WorkingArea.Bottom - effH - 6;
+                            targetX = pt.x + 8;
+                            targetY = pt.y + 8;
+                            if (targetX + effW > targetScreen.WorkingArea.Right) targetX = pt.x - effW - 8;
+                            if (targetY + effH > targetScreen.WorkingArea.Bottom) targetY = pt.y - effH - 8;
+                            if (targetX < targetScreen.WorkingArea.Left) targetX = targetScreen.WorkingArea.Left + 8;
+                            if (targetY < targetScreen.WorkingArea.Top) targetY = targetScreen.WorkingArea.Top + 8;
+                        }
+
+                        // Если окно открылось на чужом мониторе или смещено, корректируем его положение
+                        if (Math.Abs(rc.Left - targetX) > 40 || Math.Abs(rc.Top - targetY) > 40)
+                        {
+                            SetWindowPos(foundHwnd, IntPtr.Zero, targetX, targetY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
+                            Logger.Log("Repositioned TextInputHost to " + targetX + "," + targetY + " on screen " + targetScreen.DeviceName);
                         }
                     }
-                    else
-                    {
-                        // Вызов из контекстного меню папки: открываем прямо возле курсора мыши
-                        targetX = pt.x + 8;
-                        targetY = pt.y + 8;
-                        if (targetX + effW > targetScreen.WorkingArea.Right) targetX = pt.x - effW - 8;
-                        if (targetY + effH > targetScreen.WorkingArea.Bottom) targetY = pt.y - effH - 8;
-                        if (targetX < targetScreen.WorkingArea.Left) targetX = targetScreen.WorkingArea.Left + 8;
-                        if (targetY < targetScreen.WorkingArea.Top) targetY = targetScreen.WorkingArea.Top + 8;
-                    }
-
-                    SetWindowPos(foundHwnd, IntPtr.Zero, targetX, targetY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
-                    Logger.Log("Positioned Clipboard History window at " + targetX + "," + targetY + " on screen " + targetScreen.DeviceName + " (eff size: " + effW + "x" + effH + ")");
-                    break;
                 }
-            }
+            });
         }
 
         private static void RunDaemonMode()
