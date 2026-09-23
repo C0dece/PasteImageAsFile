@@ -185,7 +185,7 @@ namespace PasteImageAsFile
                 GetWindowRect(hwnd, out rc);
                 int w = rc.Right - rc.Left;
                 int h = rc.Bottom - rc.Top;
-                if (w < 100 || h < 100) return true;
+                if (w < 150 || h < 150) return true;
 
                 if (IsTaskbarOrTrayWindow(hwnd)) return true;
 
@@ -194,9 +194,8 @@ namespace PasteImageAsFile
                 string cls = sb.ToString();
                 if (cls == "Progman" || cls == "WorkerW") return true;
 
-                Rectangle winRect = new Rectangle(rc.Left, rc.Top, w, h);
-                // Проверяем, что окно принадлежит именно монитору курсора
-                if (screen.Bounds.IntersectsWith(winRect))
+                Screen s = Screen.FromHandle(hwnd);
+                if (s != null && s.DeviceName == screen.DeviceName)
                 {
                     found = hwnd;
                     return false;
@@ -257,37 +256,23 @@ namespace PasteImageAsFile
                 Screen targetScreen = Screen.FromPoint(new Point(pt.x, pt.y));
                 Logger.Log("ShowClipboardHistory: target screen: " + targetScreen.DeviceName + " bounds: " + targetScreen.Bounds + " workingArea: " + targetScreen.WorkingArea);
 
-                // Снимаем залипание трея
-                if (fromTray && watcherWindow != null)
+                // Активируем пользовательское окно на целевом мониторе (или рабочий стол)
+                IntPtr targetWin = FindLastActiveUserWindowOnScreen(targetScreen);
+                if (targetWin != IntPtr.Zero)
                 {
-                    try
-                    {
-                        SetForegroundWindow(watcherWindow.Handle);
-                        PostMessage(watcherWindow.Handle, WM_NULL, IntPtr.Zero, IntPtr.Zero);
-                    }
-                    catch {}
+                    ForceForegroundWindow(targetWin);
+                    Logger.Log("Focused user window on target screen: " + targetWin);
                 }
-
-                // Перевод фокуса на монитор вызова
-                if (!targetScreen.Primary)
+                else
                 {
-                    IntPtr userWin = FindLastActiveUserWindowOnScreen(targetScreen);
-                    if (userWin != IntPtr.Zero)
+                    IntPtr progman = FindWindow("Progman", null);
+                    if (progman != IntPtr.Zero)
                     {
-                        ForceForegroundWindow(userWin);
-                        Logger.Log("Focused user window on secondary screen: " + userWin);
+                        ForceForegroundWindow(progman);
+                        Logger.Log("Focused Progman for desktop");
                     }
-                    else
-                    {
-                        IntPtr progman = FindWindow("Progman", null);
-                        if (progman != IntPtr.Zero)
-                        {
-                            ForceForegroundWindow(progman);
-                            Logger.Log("Focused Progman for secondary screen desktop");
-                        }
-                    }
-                    Thread.Sleep(30);
                 }
+                Thread.Sleep(30);
 
                 // Отправляем Win+V штатным системным образом
                 keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
