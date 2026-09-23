@@ -16,6 +16,7 @@ namespace PasteImageAsFile
         private static ClipboardListenerWindow watcherWindow;
         private static NotifyIcon trayIcon;
         private static MainForm mainForm;
+        private static AnchorForm anchorForm;
 
         [DllImport("user32.dll")]
         static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
@@ -256,25 +257,64 @@ namespace PasteImageAsFile
                 Screen targetScreen = Screen.FromPoint(new Point(pt.x, pt.y));
                 Logger.Log("ShowClipboardHistory: target screen: " + targetScreen.DeviceName + " bounds: " + targetScreen.Bounds + " workingArea: " + targetScreen.WorkingArea);
 
-                // Активируем пользовательское окно на целевом мониторе (или рабочий стол)
-                IntPtr targetWin = FindLastActiveUserWindowOnScreen(targetScreen);
-                if (targetWin != IntPtr.Zero)
+                int anchorX;
+                int anchorY;
+
+                if (fromTray)
                 {
-                    ForceForegroundWindow(targetWin);
-                    Logger.Log("Focused user window on target screen: " + targetWin);
+                    // Меню истории буфера обмена Windows 11 имеет ширину около 360-380 пикселей.
+                    // При клике в трей позиционируем каретку у правого края монитора, где расположен трей.
+                    anchorX = targetScreen.WorkingArea.Right - 380 - 12;
+
+                    // Если верхняя граница рабочей области смещена вниз от верхней границы монитора,
+                    // значит панель задач находится СВЕРХУ (как в пользовательской конфигурации).
+                    if (targetScreen.WorkingArea.Top > targetScreen.Bounds.Top)
+                    {
+                        // Меню будет аккуратно выпадать сверху вниз прямо из панели задач у трея
+                        anchorY = targetScreen.WorkingArea.Top + 6;
+                    }
+                    else
+                    {
+                        // Трей снизу: меню открывается снизу вверх от панели задач
+                        anchorY = targetScreen.WorkingArea.Bottom - 24;
+                    }
                 }
                 else
                 {
-                    IntPtr progman = FindWindow("Progman", null);
-                    if (progman != IntPtr.Zero)
-                    {
-                        ForceForegroundWindow(progman);
-                        Logger.Log("Focused Progman for desktop");
-                    }
+                    // Вызов из контекстного меню проводника или рабочего стола: меню открывается рядом с курсором
+                    anchorX = Math.Max(targetScreen.WorkingArea.Left + 10, Math.Min(pt.x - 50, targetScreen.WorkingArea.Right - 380));
+                    anchorY = Math.Max(targetScreen.WorkingArea.Top + 10, Math.Min(pt.y - 10, targetScreen.WorkingArea.Bottom - 100));
                 }
-                Thread.Sleep(30);
 
-                // Отправляем Win+V штатным системным образом
+                Logger.Log("ShowClipboardHistory: target anchor position: (" + anchorX + "," + anchorY + ")");
+
+                Action activateAnchor = () => {
+                    try
+                    {
+                        if (anchorForm == null || anchorForm.IsDisposed)
+                        {
+                            anchorForm = new AnchorForm();
+                        }
+                        anchorForm.PositionAndFocus(anchorX, anchorY);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Log("activateAnchor error: " + ex.Message);
+                    }
+                };
+
+                if (anchorForm != null && !anchorForm.IsDisposed && anchorForm.InvokeRequired)
+                {
+                    anchorForm.Invoke(activateAnchor);
+                }
+                else
+                {
+                    activateAnchor();
+                }
+
+                Thread.Sleep(60);
+
+                // Отправляем Win+V системным образом
                 keybd_event(VK_LWIN, 0, 0, UIntPtr.Zero);
                 keybd_event(VK_V, 0, 0, UIntPtr.Zero);
                 Thread.Sleep(25);
@@ -448,6 +488,11 @@ namespace PasteImageAsFile
                 trayIcon.Visible = false;
                 trayIcon.Dispose();
                 trayIcon = null;
+            }
+            if (anchorForm != null)
+            {
+                anchorForm.Dispose();
+                anchorForm = null;
             }
             StopWatcher();
             Application.Exit();
