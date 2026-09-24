@@ -46,6 +46,7 @@ namespace PasteImageAsFile
         private bool isPinned = false;
         private System.Windows.Forms.Timer pollTimer;
         private DateTime lastPointerInside = DateTime.MinValue;
+        private int hoverExpandCounter = 0;
 
         private Panel pnlHeader;
         private Label lblTitle;
@@ -91,6 +92,13 @@ namespace PasteImageAsFile
             this.AllowDrop = true;
             this.DoubleBuffered = true;
             this.MinimumSize = new Size(1, 1);
+
+            this.Click += (s, e) => {
+                if (!isExpanded)
+                {
+                    ExpandShelf();
+                }
+            };
 
             toolTip = new ToolTip();
             toolTip.AutoPopDelay = 5000;
@@ -536,15 +544,14 @@ namespace PasteImageAsFile
             {
                 int x = scr.WorkingArea.Left + (scr.WorkingArea.Width - CollapsedBarLength) / 2;
                 int y = IsPositionTop() ? scr.WorkingArea.Top : (scr.WorkingArea.Bottom - CollapsedBarThickness);
-                this.Size = new Size(CollapsedBarLength, CollapsedBarThickness);
-                this.Location = new Point(x, y);
+                this.SetBounds(x, y, CollapsedBarLength, CollapsedBarThickness);
                 btnCollapse.Text = IsPositionTop() ? "▲" : "▼";
             }
             else
             {
                 int y = CalculateShelfY(scr) + (ShelfHeightVertical - CollapsedBarLength) / 2;
                 int x = IsPositionOnLeft() ? scr.WorkingArea.Left : (scr.WorkingArea.Right - CollapsedBarThickness);
-                this.Location = new Point(x, y);
+                this.SetBounds(x, y, CollapsedBarThickness, CollapsedBarLength);
                 btnCollapse.Text = IsPositionOnLeft() ? "‹" : "›";
             }
 
@@ -558,11 +565,10 @@ namespace PasteImageAsFile
             if (!Config.SuperHubEnabled) return;
             if (isExpanded) return;
 
-            DesktopHelper.POINT pt;
-            GetCursorPos(out pt);
-            Screen scr = Screen.FromPoint(new Point(pt.x, pt.y));
-
+            Screen scr = Screen.PrimaryScreen;
             this.isExpanded = true;
+
+            this.SuspendLayout();
 
             if (IsHorizontalPosition())
             {
@@ -571,8 +577,7 @@ namespace PasteImageAsFile
                 int x = scr.WorkingArea.Left + (scr.WorkingArea.Width - w) / 2;
                 int y = IsPositionTop() ? scr.WorkingArea.Top : (scr.WorkingArea.Bottom - h);
 
-                this.Location = new Point(x, y);
-                this.Size = new Size(w, h);
+                this.SetBounds(x, y, w, h);
                 btnCollapse.Text = IsPositionTop() ? "▲" : "▼";
 
                 pnlHeader.Size = new Size(w, 38);
@@ -588,8 +593,7 @@ namespace PasteImageAsFile
                 int y = CalculateShelfY(scr);
                 int x = IsPositionOnLeft() ? scr.WorkingArea.Left : (scr.WorkingArea.Right - w);
 
-                this.Location = new Point(x, y);
-                this.Size = new Size(w, h);
+                this.SetBounds(x, y, w, h);
                 btnCollapse.Text = IsPositionOnLeft() ? "‹" : "›";
 
                 pnlHeader.Size = new Size(w, 38);
@@ -605,6 +609,8 @@ namespace PasteImageAsFile
             pnlContent.Visible = true;
 
             RefreshItems();
+            this.ResumeLayout(true);
+
             ApplyWindowStyles();
             this.BringToFront();
             this.Invalidate();
@@ -628,39 +634,23 @@ namespace PasteImageAsFile
             if (!GetCursorPos(out pt)) return;
 
             Point cur = new Point(pt.x, pt.y);
-            Screen scr = Screen.FromPoint(cur);
 
-            int sens = Math.Max(20, Config.SuperHubSensitivity);
-            bool isLeftDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
-
-            // Логика приближения: только непосредственно в районе ярлычка полки
-            bool nearEdge = false;
-            if (IsHorizontalPosition())
+            // Проверяем нахождение курсора над областью окна SuperHub
+            Rectangle hitArea = this.Bounds;
+            if (!isExpanded)
             {
-                int midX = this.Left + this.Width / 2;
-                if (IsPositionTop())
+                // Небольшой допуск по краям ярлычка (не более 4-8px), чтобы на него было легко навестись
+                if (IsHorizontalPosition())
                 {
-                    nearEdge = (cur.Y <= scr.WorkingArea.Top + sens && Math.Abs(cur.X - midX) <= 120);
+                    hitArea.Inflate(8, 4);
                 }
                 else
                 {
-                    nearEdge = (cur.Y >= scr.WorkingArea.Bottom - sens && Math.Abs(cur.X - midX) <= 120);
-                }
-            }
-            else
-            {
-                int midY = this.Top + this.Height / 2;
-                if (IsPositionOnLeft())
-                {
-                    nearEdge = (cur.X <= scr.WorkingArea.Left + sens && Math.Abs(cur.Y - midY) <= 120);
-                }
-                else
-                {
-                    nearEdge = (cur.X >= scr.WorkingArea.Right - sens && Math.Abs(cur.Y - midY) <= 120);
+                    hitArea.Inflate(4, 8);
                 }
             }
 
-            bool isOverUs = this.Bounds.Contains(cur);
+            bool isOverUs = hitArea.Contains(cur);
 
             if (isOverUs)
             {
@@ -669,15 +659,26 @@ namespace PasteImageAsFile
 
             if (!isExpanded)
             {
-                // Раскрытие: только если курсор над самим видимым ярлычком или зажата мышь вблизи ярлычка
-                if ((isLeftDown && nearEdge) || isOverUs)
+                // Раскрытие: только при наведении непосредственно на ярлычок с небольшой задержкой (100мс),
+                // чтобы исключить случайные срабатывания при быстром движении мыши по экрану
+                if (isOverUs)
                 {
-                    ExpandShelf();
+                    hoverExpandCounter++;
+                    if (hoverExpandCounter >= 2)
+                    {
+                        hoverExpandCounter = 0;
+                        ExpandShelf();
+                    }
+                }
+                else
+                {
+                    hoverExpandCounter = 0;
                 }
             }
             else
             {
                 // Сворачивание при уходе мыши
+                bool isLeftDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
                 if (!isPinned && !isOverUs && !isLeftDown)
                 {
                     if ((DateTime.UtcNow - lastPointerInside).TotalMilliseconds > 650)
@@ -695,6 +696,11 @@ namespace PasteImageAsFile
                 e.Effect = DragDropEffects.Copy;
                 dropHint.BackColor = ThemeHelper.AccentBackground;
                 if (lblDropHint != null) lblDropHint.ForeColor = ThemeHelper.Accent;
+
+                if (!isExpanded)
+                {
+                    ExpandShelf();
+                }
             }
         }
 
@@ -703,6 +709,10 @@ namespace PasteImageAsFile
             if (e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent(DataFormats.UnicodeText))
             {
                 e.Effect = DragDropEffects.Copy;
+                if (!isExpanded)
+                {
+                    ExpandShelf();
+                }
             }
         }
 
@@ -746,6 +756,7 @@ namespace PasteImageAsFile
             lblTitle.Text = string.Format("📦 SuperHub [{0}]", items.Count);
             LayoutHeaderControls();
 
+            cardsList.SuspendLayout();
             cardsList.Controls.Clear();
             scrollOffset = 0;
 
@@ -787,6 +798,7 @@ namespace PasteImageAsFile
                 maxScrollOffset = Math.Max(0, cardsList.Height - pnlContent.Height);
             }
 
+            cardsList.ResumeLayout(true);
             pnlContent.Invalidate();
         }
 
