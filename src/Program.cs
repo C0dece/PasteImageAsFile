@@ -181,7 +181,7 @@ namespace PasteImageAsFile
             return false;
         }
 
-        private static IntPtr FindLastActiveUserWindowOnScreen(Screen screen)
+        public static IntPtr FindLastActiveUserWindowOnScreen(Screen screen)
         {
             IntPtr found = IntPtr.Zero;
             uint currentPid = (uint)Process.GetCurrentProcess().Id;
@@ -261,12 +261,29 @@ namespace PasteImageAsFile
                 {
                     DesktopHelper.POINT curPt;
                     DesktopHelper.TryGetCursorPosition(out curPt);
+                    Point pt = new Point(curPt.x, curPt.y);
+                    Screen scr = Screen.FromPoint(pt);
                     IntPtr prevFg = GetForegroundWindow();
-                    ClipboardFlyoutForm.ShowFlyout(new Point(curPt.x, curPt.y), prevFg);
+                    if (prevFg == IntPtr.Zero || IsTaskbarOrTrayWindow(prevFg))
+                    {
+                        IntPtr userWnd = FindLastActiveUserWindowOnScreen(scr);
+                        if (userWnd != IntPtr.Zero) prevFg = userWnd;
+                    }
+                    ClipboardFlyoutForm.ShowFlyout(pt, prevFg);
                     return;
                 }
 
-                // Иначе мы вызваны из контекстного меню Проводника или CLI:
+                if (ShellIntegration.IsDaemonRunning())
+                {
+                    uint wmMsg = RegisterWindowMessage(ClipboardListenerWindow.FLYOUT_MSG_NAME);
+                    if (wmMsg != 0)
+                    {
+                        PostMessage((IntPtr)0xffff, wmMsg, IntPtr.Zero, IntPtr.Zero);
+                        Logger.Log("Broadcasted WM_SHOW_FLYOUT_MSG to running daemon");
+                        return;
+                    }
+                }
+
                 // Пытаемся разбудить работающий демон через именованный Event
                 try
                 {
@@ -283,10 +300,10 @@ namespace PasteImageAsFile
                     Logger.Log("Event open failed: " + exSignal.Message);
                 }
 
-                DesktopHelper.POINT pt;
-                DesktopHelper.TryGetCursorPosition(out pt);
+                DesktopHelper.POINT cliPt;
+                DesktopHelper.TryGetCursorPosition(out cliPt);
                 IntPtr fg = GetForegroundWindow();
-                ClipboardFlyoutForm.ShowFlyout(new Point(pt.x, pt.y), fg);
+                ClipboardFlyoutForm.ShowFlyout(new Point(cliPt.x, cliPt.y), fg);
                 Application.Run();
             }
             catch (Exception ex)
@@ -548,10 +565,17 @@ namespace PasteImageAsFile
                 {
                     if (Config.TrayClickOpensClipboard)
                     {
-                        IntPtr prevFg = GetForegroundWindow();
                         DesktopHelper.POINT curPt;
                         DesktopHelper.TryGetCursorPosition(out curPt);
-                        ClipboardFlyoutForm.ShowFlyout(new Point(curPt.x, curPt.y), prevFg);
+                        Point pt = new Point(curPt.x, curPt.y);
+                        Screen scr = Screen.FromPoint(pt);
+                        IntPtr prevFg = GetForegroundWindow();
+                        if (prevFg == IntPtr.Zero || IsTaskbarOrTrayWindow(prevFg))
+                        {
+                            IntPtr userWnd = FindLastActiveUserWindowOnScreen(scr);
+                            if (userWnd != IntPtr.Zero) prevFg = userWnd;
+                        }
+                        ClipboardFlyoutForm.ShowFlyout(pt, prevFg);
                     }
                     else
                     {

@@ -79,6 +79,46 @@ namespace PasteImageAsFile
             set { SetDword("SuperHubFloatMode", value ? 1 : 0); }
         }
 
+        public static string ThemeMode
+        {
+            get { return GetString("ThemeMode", "System"); }
+            set 
+            { 
+                SetString("ThemeMode", value); 
+                ThemeHelper.NotifyThemeChanged();
+            }
+        }
+
+        public static bool SuperHubEnabled
+        {
+            get { return GetDword("SuperHubEnabled", 1) == 1; }
+            set { SetDword("SuperHubEnabled", value ? 1 : 0); }
+        }
+
+        public static string SuperHubPosition
+        {
+            get { return GetString("SuperHubPosition", "RightCenter"); }
+            set { SetString("SuperHubPosition", value); }
+        }
+
+        public static string SuperHubDragMode
+        {
+            get { return GetString("SuperHubDragMode", "Copy"); }
+            set { SetString("SuperHubDragMode", value); }
+        }
+
+        public static string ClipboardClickAction
+        {
+            get { return GetString("ClipboardClickAction", "Paste"); }
+            set { SetString("ClipboardClickAction", value); }
+        }
+
+        public static int SuperHubSensitivity
+        {
+            get { return GetDword("SuperHubSensitivity", 60); }
+            set { SetDword("SuperHubSensitivity", value); }
+        }
+
         private static int GetDword(string name, int defaultValue)
         {
             try
