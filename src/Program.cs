@@ -99,8 +99,16 @@ namespace PasteImageAsFile
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
         static extern uint RegisterWindowMessage(string lpString);
 
+        [DllImport("user32.dll")]
+        static extern bool BringWindowToTop(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
         const uint GA_ROOT = 2;
         const int ASFW_ANY = -1;
+        const int SW_RESTORE = 9;
+        const byte VK_MENU = 0x12;
 
         public static bool IsWatcherRunningInCurrentProcess
         {
@@ -219,33 +227,76 @@ namespace PasteImageAsFile
             return found;
         }
 
-        private static void ForceForegroundWindow(IntPtr hWnd)
+        public static IntPtr FindLastActiveUserWindow(Screen preferredScreen = null)
+        {
+            IntPtr found = IntPtr.Zero;
+            if (preferredScreen != null)
+            {
+                found = FindLastActiveUserWindowOnScreen(preferredScreen);
+                if (found != IntPtr.Zero) return found;
+            }
+
+            uint currentPid = (uint)Process.GetCurrentProcess().Id;
+            EnumWindows((hwnd, lParam) => {
+                if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return true;
+
+                uint pid;
+                GetWindowThreadProcessId(hwnd, out pid);
+                if (pid == currentPid) return true;
+
+                RECT rc;
+                GetWindowRect(hwnd, out rc);
+                int w = rc.Right - rc.Left;
+                int h = rc.Bottom - rc.Top;
+                if (w < 150 || h < 150) return true;
+
+                if (IsTaskbarOrTrayWindow(hwnd)) return true;
+
+                var sb = new System.Text.StringBuilder(128);
+                GetClassName(hwnd, sb, 128);
+                string cls = sb.ToString();
+                if (cls == "Progman" || cls == "WorkerW") return true;
+
+                found = hwnd;
+                return false;
+            }, IntPtr.Zero);
+
+            return found;
+        }
+
+        public static void ForceForegroundWindow(IntPtr hWnd)
         {
             if (hWnd == IntPtr.Zero) return;
             try
             {
                 AllowSetForegroundWindow(ASFW_ANY);
-                uint foreThread = 0;
-                IntPtr fg = GetForegroundWindow();
-                if (fg != IntPtr.Zero)
-                {
-                    GetWindowThreadProcessId(fg, out foreThread);
-                }
+
+                // Имитация нажатия Alt для снятия блокировки переднего плана Windows
+                keybd_event(VK_MENU, 0, 0, UIntPtr.Zero);
+                keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+                uint targetPid;
+                uint targetThread = GetWindowThreadProcessId(hWnd, out targetPid);
                 uint appThread = GetCurrentThreadId();
-                if (foreThread != 0 && foreThread != appThread)
+
+                if (targetThread != 0 && targetThread != appThread)
                 {
-                    AttachThreadInput(appThread, foreThread, true);
+                    AttachThreadInput(appThread, targetThread, true);
+                    BringWindowToTop(hWnd);
+                    ShowWindow(hWnd, SW_RESTORE);
                     SetForegroundWindow(hWnd);
-                    AttachThreadInput(appThread, foreThread, false);
+                    AttachThreadInput(appThread, targetThread, false);
                 }
                 else
                 {
+                    BringWindowToTop(hWnd);
+                    ShowWindow(hWnd, SW_RESTORE);
                     SetForegroundWindow(hWnd);
                 }
             }
             catch
             {
-                SetForegroundWindow(hWnd);
+                try { SetForegroundWindow(hWnd); } catch {}
             }
         }
 
@@ -266,7 +317,7 @@ namespace PasteImageAsFile
                     IntPtr prevFg = GetForegroundWindow();
                     if (prevFg == IntPtr.Zero || IsTaskbarOrTrayWindow(prevFg))
                     {
-                        IntPtr userWnd = FindLastActiveUserWindowOnScreen(scr);
+                        IntPtr userWnd = FindLastActiveUserWindow(scr);
                         if (userWnd != IntPtr.Zero) prevFg = userWnd;
                     }
                     ClipboardFlyoutForm.ShowFlyout(pt, prevFg);
@@ -572,7 +623,7 @@ namespace PasteImageAsFile
                         IntPtr prevFg = GetForegroundWindow();
                         if (prevFg == IntPtr.Zero || IsTaskbarOrTrayWindow(prevFg))
                         {
-                            IntPtr userWnd = FindLastActiveUserWindowOnScreen(scr);
+                            IntPtr userWnd = FindLastActiveUserWindow(scr);
                             if (userWnd != IntPtr.Zero) prevFg = userWnd;
                         }
                         ClipboardFlyoutForm.ShowFlyout(pt, prevFg);

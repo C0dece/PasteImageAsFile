@@ -29,6 +29,9 @@ namespace PasteImageAsFile
         [DllImport("user32.dll")]
         public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
 
+        [DllImport("user32.dll")]
+        static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
         const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
         const int DWMWCP_ROUND = 2;
         const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
@@ -39,6 +42,89 @@ namespace PasteImageAsFile
         const byte VK_CONTROL = 0x11;
         const byte VK_V = 0x56;
         const uint KEYEVENTF_KEYUP = 0x0002;
+
+        private const int WM_NCHITTEST = 0x0084;
+        private const int WM_GETMINMAXINFO = 0x0024;
+        private const int HTCLIENT = 1;
+        private const int HTLEFT = 10;
+        private const int HTRIGHT = 11;
+        private const int HTTOP = 12;
+        private const int HTTOPLEFT = 13;
+        private const int HTTOPRIGHT = 14;
+        private const int HTBOTTOM = 15;
+        private const int HTBOTTOMLEFT = 16;
+        private const int HTBOTTOMRIGHT = 17;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MINMAXINFO
+        {
+            public Point ptReserved;
+            public Point ptMaxSize;
+            public Point ptMaxPosition;
+            public Point ptMinTrackSize;
+            public Point ptMaxTrackSize;
+        }
+
+        private class FlyoutViewportPanel : Panel
+        {
+            private const int WM_NCHITTEST = 0x0084;
+            private const int HTTRANSPARENT = -1;
+
+            public FlyoutViewportPanel()
+            {
+                this.DoubleBuffered = true;
+                this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == WM_NCHITTEST)
+                {
+                    Point pt = this.PointToClient(new Point(m.LParam.ToInt32()));
+                    int border = 8;
+                    if (pt.X >= this.Width - border || pt.Y >= this.Height - border || pt.X <= border)
+                    {
+                        m.Result = (IntPtr)HTTRANSPARENT;
+                        return;
+                    }
+                }
+                base.WndProc(ref m);
+            }
+        }
+
+        private class FlyoutTopBarPanel : Panel
+        {
+            private const int WM_NCHITTEST = 0x0084;
+            private const int HTTRANSPARENT = -1;
+
+            public FlyoutTopBarPanel()
+            {
+                this.DoubleBuffered = true;
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == WM_NCHITTEST)
+                {
+                    Point pt = this.PointToClient(new Point(m.LParam.ToInt32()));
+                    int border = 8;
+                    if (pt.Y <= border || pt.X <= border || pt.X >= this.Width - border)
+                    {
+                        m.Result = (IntPtr)HTTRANSPARENT;
+                        return;
+                    }
+                }
+                base.WndProc(ref m);
+            }
+        }
+
+        private static bool IsOurAppWindow(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero) return false;
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+            return pid == (uint)Process.GetCurrentProcess().Id;
+        }
 
         private static ClipboardFlyoutForm currentInstance;
         private static readonly object instanceLock = new object();
@@ -54,7 +140,7 @@ namespace PasteImageAsFile
         }
 
         private IntPtr previousForegroundWindow = IntPtr.Zero;
-        private Panel pnlTopBar;
+        private FlyoutTopBarPanel pnlTopBar;
         private Label lblAppHeader;
         private Panel pnlTabs;
         private Panel pnlActionHeader;
@@ -62,7 +148,7 @@ namespace PasteImageAsFile
         private Panel pnlSearch;
         private Panel searchBoxBg;
         private TextBox txtSearch;
-        private Panel pnlViewport;
+        private FlyoutViewportPanel pnlViewport;
         private Panel cardsContainer;
         private Button btnPinWindow;
         private Button btnClose;
@@ -91,7 +177,8 @@ namespace PasteImageAsFile
             this.FormBorderStyle = FormBorderStyle.None;
             this.ShowInTaskbar = false;
             this.StartPosition = FormStartPosition.Manual;
-            this.Size = new Size(420, 580);
+            this.Size = new Size(Config.ClipboardFlyoutWidth, Config.ClipboardFlyoutHeight);
+            this.MinimumSize = new Size(320, 380);
             this.DoubleBuffered = true;
             this.TopMost = true;
             this.KeyPreview = true;
@@ -202,6 +289,108 @@ namespace PasteImageAsFile
             }
         }
 
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_NCHITTEST)
+            {
+                base.WndProc(ref m);
+                Point screenPt = new Point(m.LParam.ToInt32());
+                Point clientPt = this.PointToClient(screenPt);
+                int border = 8;
+
+                bool onLeft = clientPt.X <= border;
+                bool onRight = clientPt.X >= this.ClientSize.Width - border;
+                bool onTop = clientPt.Y <= border;
+                bool onBottom = clientPt.Y >= this.ClientSize.Height - border;
+
+                if (onTop && onLeft) { m.Result = (IntPtr)HTTOPLEFT; return; }
+                if (onTop && onRight) { m.Result = (IntPtr)HTTOPRIGHT; return; }
+                if (onBottom && onLeft) { m.Result = (IntPtr)HTBOTTOMLEFT; return; }
+                if (onBottom && onRight) { m.Result = (IntPtr)HTBOTTOMRIGHT; return; }
+                if (onLeft) { m.Result = (IntPtr)HTLEFT; return; }
+                if (onRight) { m.Result = (IntPtr)HTRIGHT; return; }
+                if (onTop) { m.Result = (IntPtr)HTTOP; return; }
+                if (onBottom) { m.Result = (IntPtr)HTBOTTOM; return; }
+                return;
+            }
+            if (m.Msg == WM_GETMINMAXINFO)
+            {
+                MINMAXINFO mmi = (MINMAXINFO)Marshal.PtrToStructure(m.LParam, typeof(MINMAXINFO));
+                mmi.ptMinTrackSize = new Point(320, 380);
+                mmi.ptMaxTrackSize = new Point(1200, 1200);
+                Marshal.StructureToPtr(mmi, m.LParam, true);
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            LayoutControls();
+            if (this.WindowState == FormWindowState.Normal && this.Width >= 320 && this.Height >= 380)
+            {
+                Config.ClipboardFlyoutWidth = this.Width;
+                Config.ClipboardFlyoutHeight = this.Height;
+            }
+        }
+
+        private void LayoutControls()
+        {
+            if (pnlTopBar == null) return;
+            this.SuspendLayout();
+
+            int w = this.ClientSize.Width;
+            int h = this.ClientSize.Height;
+
+            pnlTopBar.Width = w;
+            if (btnClose != null) btnClose.Location = new Point(w - 34, 4);
+            if (btnPinWindow != null) btnPinWindow.Location = new Point(w - 66, 4);
+
+            if (pnlTabs != null) pnlTabs.Width = w;
+
+            if (pnlActionHeader != null)
+            {
+                pnlActionHeader.Width = w;
+                if (btnClearAll != null) btnClearAll.Location = new Point(w - 114, 6);
+                if (btnClickMode != null) btnClickMode.Location = new Point(w - 216, 6);
+            }
+
+            if (pnlSearch != null)
+            {
+                pnlSearch.Width = w;
+                if (txtSearch != null && searchBoxBg != null)
+                {
+                    txtSearch.Width = Math.Max(100, searchBoxBg.ClientSize.Width - 36);
+                }
+            }
+
+            int contentTop = 142;
+            if (pnlViewport != null)
+            {
+                pnlViewport.Location = new Point(0, contentTop);
+                pnlViewport.Size = new Size(w, Math.Max(50, h - contentTop - 4));
+                if (cardsContainer != null)
+                {
+                    int cardW = Math.Max(100, pnlViewport.ClientSize.Width - 24);
+                    cardsContainer.Width = cardW;
+                    foreach (Control c in cardsContainer.Controls)
+                    {
+                        c.Width = cardW;
+                        foreach (Control sub in c.Controls)
+                        {
+                            if (sub is Button && sub.Text == "···") sub.Left = cardW - 30;
+                            else if (sub is Button && sub.Text == "📌") sub.Left = cardW - 30;
+                            else if (sub is Button && sub.Text == "👁") sub.Left = cardW - 58;
+                            else if (sub is Label && sub.Left > 60) sub.Width = Math.Max(40, cardW - sub.Left - 64);
+                        }
+                    }
+                }
+            }
+
+            this.ResumeLayout(true);
+        }
+
         private void DragWindow()
         {
             try
@@ -217,7 +406,7 @@ namespace PasteImageAsFile
             this.SuspendLayout();
 
             // 1. Верхний бар (TopBar) - 34px: заголовок и кнопки закрепа/закрытия
-            pnlTopBar = new Panel
+            pnlTopBar = new FlyoutTopBarPanel
             {
                 Location = new Point(0, 0),
                 Size = new Size(this.Width, 34),
@@ -439,26 +628,23 @@ namespace PasteImageAsFile
                 Padding = new Padding(8, 4, 8, 4)
             };
             searchBoxBg.Paint += (s, e) => {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using (var pen = new Pen(ThemeHelper.CardBorder, 1))
                 {
                     e.Graphics.DrawRectangle(pen, 0, 0, searchBoxBg.Width - 1, searchBoxBg.Height - 1);
                 }
+                // Четкая векторная лупа в стиле Fluent
+                using (var iconPen = new Pen(Color.FromArgb(160, 160, 160), 1.6f))
+                {
+                    e.Graphics.DrawEllipse(iconPen, 8f, 7f, 9.5f, 9.5f);
+                    e.Graphics.DrawLine(iconPen, 15.5f, 14.5f, 19.5f, 18.5f);
+                }
             };
-
-            Label searchIcon = new Label
-            {
-                Text = "🔍",
-                Font = new Font("Segoe UI", 7.5f),
-                ForeColor = Color.FromArgb(140, 140, 140),
-                Location = new Point(6, 4),
-                Size = new Size(20, 16)
-            };
-            searchBoxBg.Controls.Add(searchIcon);
 
             txtSearch = new TextBox
             {
                 Location = new Point(28, 4),
-                Width = 350,
+                Width = Math.Max(100, searchBoxBg.ClientSize.Width - 36),
                 BorderStyle = BorderStyle.None,
                 BackColor = Color.FromArgb(38, 38, 38),
                 ForeColor = Color.White,
@@ -473,7 +659,7 @@ namespace PasteImageAsFile
 
             // 5. Область просмотра карточек с кастомным Fluent-скроллбаром
             int contentTop = 142;
-            pnlViewport = new Panel
+            pnlViewport = new FlyoutViewportPanel
             {
                 Location = new Point(0, contentTop),
                 Size = new Size(this.Width, this.ClientSize.Height - contentTop - 4),
@@ -494,8 +680,18 @@ namespace PasteImageAsFile
             pnlViewport.MouseWheel += OnViewportMouseWheel;
             cardsContainer.MouseWheel += OnViewportMouseWheel;
 
-            // Отрисовка темного Fluent Scrollbar
+            // Отрисовка темного Fluent Scrollbar и метки Resize Grip
             pnlViewport.Paint += RenderFluentScrollbar;
+            pnlViewport.Paint += (s, e) => {
+                using (var gripPen = new Pen(Color.FromArgb(90, 90, 90), 1.5f))
+                {
+                    int gx = pnlViewport.Width - 10;
+                    int gy = pnlViewport.Height - 10;
+                    e.Graphics.DrawLine(gripPen, gx + 6, gy + 2, gx + 2, gy + 6);
+                    e.Graphics.DrawLine(gripPen, gx + 6, gy - 2, gx - 2, gy + 6);
+                    e.Graphics.DrawLine(gripPen, gx + 6, gy - 6, gx - 6, gy + 6);
+                }
+            };
             pnlViewport.MouseMove += OnScrollbarMouseMove;
             pnlViewport.MouseDown += OnScrollbarMouseDown;
             pnlViewport.MouseUp += OnScrollbarMouseUp;
@@ -767,13 +963,14 @@ namespace PasteImageAsFile
             Button btnMenu = new Button
             {
                 Text = "···",
-                Location = new Point(card.Width - 32, 6),
+                Location = new Point(card.Width - 30, 6),
                 Size = new Size(24, 22),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.Transparent,
                 ForeColor = ThemeHelper.TextSecondary,
                 Font = new Font("Segoe UI", 9f, FontStyle.Bold),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                TabStop = false
             };
             btnMenu.FlatAppearance.BorderSize = 0;
             btnMenu.MouseEnter += (s, e) => { btnMenu.BackColor = ThemeHelper.ButtonHover; btnMenu.ForeColor = ThemeHelper.TextPrimary; };
@@ -785,17 +982,40 @@ namespace PasteImageAsFile
             toolTip.SetToolTip(btnMenu, "Меню действий");
             card.Controls.Add(btnMenu);
 
-            // 2. Внизу справа: кнопка закрепления [📌]
+            // 2. Вверху рядом с меню: кнопка быстрого предпросмотра [👁]
+            Button btnView = new Button
+            {
+                Text = "👁",
+                Location = new Point(card.Width - 58, 6),
+                Size = new Size(24, 22),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.Transparent,
+                ForeColor = ThemeHelper.TextSecondary,
+                Font = new Font("Segoe UI", 9f),
+                Cursor = Cursors.Hand,
+                TabStop = false
+            };
+            btnView.FlatAppearance.BorderSize = 0;
+            btnView.MouseEnter += (s, e) => { btnView.BackColor = ThemeHelper.ButtonHover; btnView.ForeColor = ThemeHelper.TextPrimary; };
+            btnView.MouseLeave += (s, e) => { btnView.BackColor = Color.Transparent; btnView.ForeColor = ThemeHelper.TextSecondary; };
+            btnView.Click += (s, e) => {
+                ItemViewerForm.ShowViewer(item);
+            };
+            toolTip.SetToolTip(btnView, "Просмотр (зум картинки, текст, документ)");
+            card.Controls.Add(btnView);
+
+            // 3. Внизу справа: кнопка закрепления [📌]
             Button btnPin = new Button
             {
                 Text = "📌",
-                Location = new Point(card.Width - 32, card.Height - 28),
+                Location = new Point(card.Width - 30, card.Height - 28),
                 Size = new Size(24, 22),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.Transparent,
                 ForeColor = item.IsPinned ? ThemeHelper.Accent : ThemeHelper.TextMuted,
                 Font = new Font("Segoe UI", 8.5f),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                TabStop = false
             };
             btnPin.FlatAppearance.BorderSize = 0;
             btnPin.MouseEnter += (s, e) => { btnPin.BackColor = ThemeHelper.ButtonHover; btnPin.ForeColor = ThemeHelper.TextPrimary; };
@@ -812,7 +1032,7 @@ namespace PasteImageAsFile
 
             // Контентная часть карточки
             int textLeft = 14;
-            int textWidth = card.Width - 52;
+            int textWidth = card.Width - 70;
             string targetPathForLaunch = null;
 
             if (item.Type == ClipboardItemType.Image && SafeFileExists(item.ImagePath))
@@ -838,7 +1058,7 @@ namespace PasteImageAsFile
                 card.Controls.Add(pic);
 
                 textLeft = 74;
-                textWidth = card.Width - 110;
+                textWidth = card.Width - 116;
 
                 Label lblImgTitle = new Label
                 {
@@ -885,7 +1105,7 @@ namespace PasteImageAsFile
                 card.Controls.Add(pic);
 
                 textLeft = 54;
-                textWidth = card.Width - 92;
+                textWidth = card.Width - 98;
 
                 Label lblFileTitle = new Label
                 {
@@ -957,13 +1177,13 @@ namespace PasteImageAsFile
 
                 // Одиночный клик: копирование или вставка по настройке
                 c.Click += (s, e) => {
-                    if (c == btnMenu || c == btnPin) return;
+                    if (c == btnMenu || c == btnPin || c == btnView) return;
                     HandleCardClick(item);
                 };
 
                 // Двойной клик открывает файл
                 c.DoubleClick += (s, e) => {
-                    if (c != btnMenu && c != btnPin && !string.IsNullOrEmpty(targetPathForLaunch))
+                    if (c != btnMenu && c != btnPin && c != btnView && !string.IsNullOrEmpty(targetPathForLaunch))
                     {
                         OpenItemInAssociatedApp(targetPathForLaunch);
                     }
@@ -971,7 +1191,7 @@ namespace PasteImageAsFile
 
                 // Зажатие и начало перетаскивания (Drag out)
                 c.MouseDown += (s, e) => {
-                    if (e.Button == MouseButtons.Left && e.Clicks == 1 && c != btnMenu && c != btnPin)
+                    if (e.Button == MouseButtons.Left && e.Clicks == 1 && c != btnMenu && c != btnPin && c != btnView)
                     {
                         StartDragItem(item, card);
                     }
@@ -979,7 +1199,7 @@ namespace PasteImageAsFile
 
                 foreach (Control sub in c.Controls)
                 {
-                    if (sub != btnMenu && sub != btnPin)
+                    if (sub != btnMenu && sub != btnPin && sub != btnView)
                     {
                         attachEvents(sub);
                     }
@@ -1054,16 +1274,18 @@ namespace PasteImageAsFile
         {
             var menu = new ContextMenu();
 
+            menu.MenuItems.Add(new MenuItem("👁 Просмотр (зум/текст)", (s, e) => ItemViewerForm.ShowViewer(item)));
+
             string targetPath = null;
             if (item.Type == ClipboardItemType.Image) targetPath = item.ImagePath;
             else if (item.Type == ClipboardItemType.Files && item.FilePaths != null && item.FilePaths.Count > 0) targetPath = item.FilePaths[0];
 
             if (!string.IsNullOrEmpty(targetPath) && (SafeFileExists(targetPath) || SafeDirectoryExists(targetPath)))
             {
-                menu.MenuItems.Add(new MenuItem("▷ Открыть", (s, e) => OpenItemInAssociatedApp(targetPath)));
-                menu.MenuItems.Add(new MenuItem("-"));
+                menu.MenuItems.Add(new MenuItem("▷ Открыть в программе", (s, e) => OpenItemInAssociatedApp(targetPath)));
             }
 
+            menu.MenuItems.Add(new MenuItem("-"));
             menu.MenuItems.Add(new MenuItem("⚡ Вставить в активное окно", (s, e) => PasteItem(item)));
             menu.MenuItems.Add(new MenuItem("📋 Скопировать в буфер", (s, e) => {
                 CopyItem(item);
@@ -1122,20 +1344,33 @@ namespace PasteImageAsFile
         {
             CopyItem(item);
 
+            IntPtr targetWnd = previousForegroundWindow;
+            if (targetWnd == IntPtr.Zero || IsOurAppWindow(targetWnd) || Program.IsTaskbarOrTrayWindow(targetWnd))
+            {
+                Screen scr = Screen.FromControl(this);
+                targetWnd = Program.FindLastActiveUserWindow(scr);
+            }
+
+            if (targetWnd != IntPtr.Zero && !IsOurAppWindow(targetWnd))
+            {
+                this.previousForegroundWindow = targetWnd;
+            }
+
             if (!isWindowPinned)
             {
                 CloseFlyout();
             }
 
             ThreadPool.QueueUserWorkItem(_ => {
-                Thread.Sleep(90);
                 try
                 {
-                    if (previousForegroundWindow != IntPtr.Zero)
+                    Thread.Sleep(50);
+                    if (targetWnd != IntPtr.Zero)
                     {
-                        SetForegroundWindow(previousForegroundWindow);
-                        Thread.Sleep(60);
+                        Program.ForceForegroundWindow(targetWnd);
+                        Thread.Sleep(40);
                     }
+
                     keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
                     keybd_event(VK_V, 0, 0, UIntPtr.Zero);
                     Thread.Sleep(20);
@@ -1278,7 +1513,7 @@ namespace PasteImageAsFile
                 // Если предыдущее окно - это панель задач (клик по трею), находим настоящее пользовательское окно
                 if (prevFg == IntPtr.Zero || Program.IsTaskbarOrTrayWindow(prevFg))
                 {
-                    IntPtr realUserWindow = Program.FindLastActiveUserWindowOnScreen(scr);
+                    IntPtr realUserWindow = Program.FindLastActiveUserWindow(scr);
                     if (realUserWindow != IntPtr.Zero)
                     {
                         prevFg = realUserWindow;

@@ -113,6 +113,18 @@ namespace PasteImageAsFile
             set { SetString("ClipboardClickAction", value); }
         }
 
+        public static int ClipboardFlyoutWidth
+        {
+            get { return Math.Max(320, Math.Min(900, GetDword("ClipboardFlyoutWidth", 420))); }
+            set { SetDword("ClipboardFlyoutWidth", Math.Max(320, Math.Min(900, value))); }
+        }
+
+        public static int ClipboardFlyoutHeight
+        {
+            get { return Math.Max(380, Math.Min(1000, GetDword("ClipboardFlyoutHeight", 580))); }
+            set { SetDword("ClipboardFlyoutHeight", Math.Max(380, Math.Min(1000, value))); }
+        }
+
         public static int SuperHubSensitivity
         {
             get { return GetDword("SuperHubSensitivity", 60); }

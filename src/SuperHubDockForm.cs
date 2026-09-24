@@ -27,9 +27,17 @@ namespace PasteImageAsFile
 
         const int VK_LBUTTON = 0x01;
 
-        private const int ExpandedWidth = 270;
-        private const int CollapsedWidth = 6;
-        private const int ShelfHeight = 460;
+        // Размеры вертикального режима
+        private const int ExpandedWidthVertical = 320;
+        private const int ShelfHeightVertical = 480;
+
+        // Размеры горизонтального режима (сверху / снизу)
+        private const int ExpandedWidthHorizontal = 580;
+        private const int ShelfHeightHorizontal = 210;
+
+        // Размеры видимого ярлычка в свернутом виде
+        private const int CollapsedBarThickness = 6;
+        private const int CollapsedBarLength = 80;
 
         private static SuperHubDockForm instance;
         private static readonly object instanceLock = new object();
@@ -55,18 +63,8 @@ namespace PasteImageAsFile
         private ToolTip toolTip;
 
         // Fluent скроллбар для полки
-        private int scrollY = 0;
-        private int maxScrollY = 0;
-
-        protected override CreateParams CreateParams
-        {
-            get
-            {
-                CreateParams cp = base.CreateParams;
-                cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW
-                return cp;
-            }
-        }
+        private int scrollOffset = 0;
+        private int maxScrollOffset = 0;
 
         public static SuperHubDockForm Instance
         {
@@ -88,7 +86,7 @@ namespace PasteImageAsFile
             this.FormBorderStyle = FormBorderStyle.None;
             this.ShowInTaskbar = false;
             this.StartPosition = FormStartPosition.Manual;
-            this.Size = new Size(CollapsedWidth, ShelfHeight);
+            this.Size = new Size(CollapsedBarThickness, CollapsedBarLength);
             this.TopMost = true;
             this.AllowDrop = true;
             this.DoubleBuffered = true;
@@ -98,9 +96,7 @@ namespace PasteImageAsFile
             toolTip.AutoPopDelay = 5000;
             toolTip.InitialDelay = 400;
 
-            this.Shown += (s, e) => {
-                ApplyWindowStyles();
-            };
+            this.Shown += (s, e) => ApplyWindowStyles();
 
             ThemeHelper.ThemeChanged += () => {
                 if (!this.IsDisposed && this.IsHandleCreated)
@@ -182,7 +178,24 @@ namespace PasteImageAsFile
             }
         }
 
-        private bool IsPositionOnLeft()
+        public bool IsHorizontalPosition()
+        {
+            string pos = Config.SuperHubPosition;
+            return string.Equals(pos, "TopCenter", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(pos, "BottomCenter", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsPositionTop()
+        {
+            return string.Equals(Config.SuperHubPosition, "TopCenter", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsPositionBottom()
+        {
+            return string.Equals(Config.SuperHubPosition, "BottomCenter", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public bool IsPositionOnLeft()
         {
             string pos = Config.SuperHubPosition;
             return pos.StartsWith("Left", StringComparison.OrdinalIgnoreCase);
@@ -197,10 +210,10 @@ namespace PasteImageAsFile
             }
             if (pos.EndsWith("Bottom", StringComparison.OrdinalIgnoreCase))
             {
-                return scr.WorkingArea.Bottom - ShelfHeight - 24;
+                return scr.WorkingArea.Bottom - ShelfHeightVertical - 24;
             }
             // Center
-            return scr.WorkingArea.Top + (scr.WorkingArea.Height - ShelfHeight) / 2;
+            return scr.WorkingArea.Top + (scr.WorkingArea.Height - ShelfHeightVertical) / 2;
         }
 
         private void BuildUI()
@@ -211,7 +224,7 @@ namespace PasteImageAsFile
             pnlHeader = new Panel
             {
                 Location = new Point(0, 0),
-                Size = new Size(ExpandedWidth, 38),
+                Size = new Size(ExpandedWidthVertical, 38),
                 BackColor = Color.FromArgb(24, 24, 24),
                 Visible = false
             };
@@ -222,17 +235,18 @@ namespace PasteImageAsFile
                 Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
                 ForeColor = Color.White,
                 Location = new Point(8, 9),
-                AutoSize = true
+                Size = new Size(110, 20),
+                AutoEllipsis = true
             };
             pnlHeader.Controls.Add(lblTitle);
 
             // Кнопка сворачивания
-            btnCollapse = CreateToolButton("›", ExpandedWidth - 26, 7, 20, 24, "Свернуть полку SuperHub");
+            btnCollapse = CreateToolButton("›", 260, 7, 22, 24, "Свернуть полку SuperHub");
             btnCollapse.Click += (s, e) => { isPinned = false; CollapseShelf(); };
             pnlHeader.Controls.Add(btnCollapse);
 
             // Кнопка закрепить [📌]
-            btnPin = CreateToolButton("📌", ExpandedWidth - 50, 7, 22, 24, "Закрепить полку на экране (не скрывать при уходе мыши)");
+            btnPin = CreateToolButton("📌", 234, 7, 22, 24, "Закрепить полку на экране (не скрывать при уходе мыши)");
             btnPin.Click += (s, e) => {
                 isPinned = !isPinned;
                 btnPin.ForeColor = isPinned ? ThemeHelper.Accent : ThemeHelper.TextSecondary;
@@ -240,26 +254,38 @@ namespace PasteImageAsFile
             };
             pnlHeader.Controls.Add(btnPin);
 
-            // Кнопка шестеренки [⚙️] (Настройки)
-            btnSettings = CreateToolButton("⚙️", ExpandedWidth - 74, 7, 22, 24, "Открыть настройки PasteImageAsFile и SuperHub");
+            // Кнопка шестеренки [⚙] (Настройки)
+            btnSettings = CreateToolButton("⚙", 208, 7, 22, 24, "Открыть настройки PasteImageAsFile и SuperHub");
             btnSettings.Click += (s, e) => { Program.ShowMainForm(); };
             pnlHeader.Controls.Add(btnSettings);
 
             // Кнопка "Перетащить все" [📦]
-            btnDragAll = CreateToolButton("📦", ExpandedWidth - 98, 7, 22, 24, "Зажать левой кнопкой мыши и перетащить все файлы полки наружу");
+            btnDragAll = CreateToolButton("📦", 182, 7, 22, 24, "Зажать левой кнопкой мыши и перетащить все файлы полки наружу");
             btnDragAll.MouseDown += (s, e) => {
                 if (e.Button == MouseButtons.Left) DragAllFilesOut();
             };
             pnlHeader.Controls.Add(btnDragAll);
 
+            // Кнопка очистки [🗑]
+            btnClear = CreateToolButton("🗑", 156, 7, 22, 24, "Очистить полку SuperHub (удалить все элементы)");
+            btnClear.Click += (s, e) => {
+                if (MessageBox.Show("Очистить все файлы на полке SuperHub?", "SuperHub", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                {
+                    ClipboardHistoryManager.Instance.ClearAll(null, true);
+                    RefreshItems();
+                }
+            };
+            pnlHeader.Controls.Add(btnClear);
+
             // Кнопка режима Drag-and-Drop: [Копия / Перенос]
             btnDragMode = new Button
             {
-                Location = new Point(ExpandedWidth - 164, 7),
-                Size = new Size(62, 24),
+                Location = new Point(88, 7),
+                Size = new Size(64, 24),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                TabStop = false
             };
             btnDragMode.FlatAppearance.BorderSize = 0;
             btnDragMode.Click += (s, e) => {
@@ -270,24 +296,14 @@ namespace PasteImageAsFile
             UpdateDragModeButtonVisual();
             pnlHeader.Controls.Add(btnDragMode);
 
-            // Кнопка очистки [🗑️]
-            btnClear = CreateToolButton("🗑️", ExpandedWidth - 190, 7, 22, 24, "Очистить полку SuperHub (удалить все элементы)");
-            btnClear.Click += (s, e) => {
-                if (MessageBox.Show("Очистить все файлы на полке SuperHub?", "SuperHub", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
-                {
-                    ClipboardHistoryManager.Instance.ClearAll(null, true);
-                    RefreshItems();
-                }
-            };
-            pnlHeader.Controls.Add(btnClear);
-
+            pnlHeader.Resize += (s, e) => LayoutHeaderControls();
             this.Controls.Add(pnlHeader);
 
-            // Зона подсказки сброса файлов (Drop Hint) - 40px
+            // Зона подсказки сброса файлов (Drop Hint) - 34px
             dropHint = new Panel
             {
-                Location = new Point(8, 44),
-                Size = new Size(ExpandedWidth - 16, 40),
+                Location = new Point(8, 42),
+                Size = new Size(ExpandedWidthVertical - 16, 34),
                 BackColor = Color.FromArgb(36, 36, 36),
                 Visible = false,
                 AllowDrop = true
@@ -314,8 +330,8 @@ namespace PasteImageAsFile
             // Область контента карточек
             pnlContent = new Panel
             {
-                Location = new Point(0, 90),
-                Size = new Size(ExpandedWidth, ShelfHeight - 94),
+                Location = new Point(0, 80),
+                Size = new Size(ExpandedWidthVertical, ShelfHeightVertical - 84),
                 BackColor = Color.FromArgb(28, 28, 28),
                 Visible = false,
                 AllowDrop = true
@@ -324,38 +340,62 @@ namespace PasteImageAsFile
             cardsList = new Panel
             {
                 Location = new Point(8, 0),
-                Width = ExpandedWidth - 18,
+                Width = ExpandedWidthVertical - 18,
                 BackColor = Color.Transparent,
                 AllowDrop = true
             };
             pnlContent.Controls.Add(cardsList);
 
             pnlContent.MouseWheel += (s, e) => {
-                if (maxScrollY <= 0) return;
+                if (maxScrollOffset <= 0) return;
                 int step = 45;
-                int newY = scrollY + (e.Delta > 0 ? -step : step);
-                if (newY < 0) newY = 0;
-                if (newY > maxScrollY) newY = maxScrollY;
-                if (newY != scrollY)
+                int newOffset = scrollOffset + (e.Delta > 0 ? -step : step);
+                if (newOffset < 0) newOffset = 0;
+                if (newOffset > maxScrollOffset) newOffset = maxScrollOffset;
+                if (newOffset != scrollOffset)
                 {
-                    scrollY = newY;
-                    cardsList.Top = -scrollY;
+                    scrollOffset = newOffset;
+                    if (IsHorizontalPosition())
+                    {
+                        cardsList.Left = -scrollOffset + 8;
+                    }
+                    else
+                    {
+                        cardsList.Top = -scrollOffset;
+                    }
                     pnlContent.Invalidate();
                 }
             };
 
             pnlContent.Paint += RenderScrollbar;
-
             this.Controls.Add(pnlContent);
 
             this.Paint += (s, e) => {
                 if (!isExpanded)
                 {
-                    // В свернутом состоянии рисуем акцентную полоску индикатора
+                    // В свернутом состоянии рисуем сплошной темный фон и акцентную линию цвета темы
+                    using (var bgBrush = new SolidBrush(ThemeHelper.HeaderBackground))
+                    {
+                        e.Graphics.FillRectangle(bgBrush, 0, 0, this.Width, this.Height);
+                    }
+
                     using (var b = new SolidBrush(ThemeHelper.Accent))
                     {
-                        int indX = IsPositionOnLeft() ? (CollapsedWidth - 4) : 0;
-                        e.Graphics.FillRectangle(b, indX, (this.Height - 64) / 2, 4, 64);
+                        if (IsHorizontalPosition())
+                        {
+                            int barY = IsPositionTop() ? 0 : (this.Height - 3);
+                            e.Graphics.FillRectangle(b, 4, barY, this.Width - 8, 3);
+                        }
+                        else
+                        {
+                            int indX = IsPositionOnLeft() ? 0 : (this.Width - 3);
+                            e.Graphics.FillRectangle(b, indX, 4, 3, this.Height - 8);
+                        }
+                    }
+
+                    using (var borderPen = new Pen(ThemeHelper.CardBorder, 1))
+                    {
+                        e.Graphics.DrawRectangle(borderPen, 0, 0, this.Width - 1, this.Height - 1);
                     }
                 }
                 else
@@ -368,6 +408,41 @@ namespace PasteImageAsFile
             };
 
             this.ResumeLayout(false);
+        }
+
+        private void LayoutHeaderControls()
+        {
+            if (pnlHeader == null) return;
+            int r = pnlHeader.Width - 4;
+
+            // Кнопки справа налево:
+            btnCollapse.Location = new Point(r - 22, 7);
+            btnCollapse.Size = new Size(22, 24);
+            r -= 24;
+
+            btnPin.Location = new Point(r - 22, 7);
+            btnPin.Size = new Size(22, 24);
+            r -= 24;
+
+            btnSettings.Location = new Point(r - 22, 7);
+            btnSettings.Size = new Size(22, 24);
+            r -= 24;
+
+            btnDragAll.Location = new Point(r - 22, 7);
+            btnDragAll.Size = new Size(22, 24);
+            r -= 24;
+
+            btnClear.Location = new Point(r - 22, 7);
+            btnClear.Size = new Size(22, 24);
+            r -= 26;
+
+            btnDragMode.Location = new Point(r - 64, 7);
+            btnDragMode.Size = new Size(64, 24);
+            r -= 68;
+
+            // Заголовок занимает пространство слева
+            lblTitle.Location = new Point(8, 9);
+            lblTitle.Size = new Size(Math.Max(50, r - 12), 20);
         }
 
         private void UpdateDragModeButtonVisual()
@@ -401,9 +476,12 @@ namespace PasteImageAsFile
                 BackColor = Color.Transparent,
                 ForeColor = ThemeHelper.TextSecondary,
                 Font = new Font("Segoe UI", 8.5f),
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                TabStop = false
             };
             btn.FlatAppearance.BorderSize = 0;
+            btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(45, 45, 45);
+            btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(60, 60, 60);
             btn.MouseEnter += (s, e) => btn.BackColor = ThemeHelper.ButtonHover;
             btn.MouseLeave += (s, e) => btn.BackColor = Color.Transparent;
             toolTip.SetToolTip(btn, tip);
@@ -412,14 +490,24 @@ namespace PasteImageAsFile
 
         private void RenderScrollbar(object sender, PaintEventArgs e)
         {
-            if (maxScrollY <= 0) return;
-            int trackH = pnlContent.Height - 16;
-            int thumbH = Math.Max(24, (int)((float)pnlContent.Height / cardsList.Height * trackH));
-            int thumbY = 6 + (int)((float)scrollY / maxScrollY * (trackH - thumbH));
+            if (maxScrollOffset <= 0) return;
 
             using (var b = new SolidBrush(ThemeHelper.ScrollBarThumb))
             {
-                e.Graphics.FillRectangle(b, pnlContent.Width - 5, thumbY, 3, thumbH);
+                if (IsHorizontalPosition())
+                {
+                    int trackW = pnlContent.Width - 16;
+                    int thumbW = Math.Max(24, (int)((float)pnlContent.Width / cardsList.Width * trackW));
+                    int thumbX = 8 + (int)((float)scrollOffset / maxScrollOffset * (trackW - thumbW));
+                    e.Graphics.FillRectangle(b, thumbX, pnlContent.Height - 5, thumbW, 3);
+                }
+                else
+                {
+                    int trackH = pnlContent.Height - 16;
+                    int thumbH = Math.Max(24, (int)((float)pnlContent.Height / cardsList.Height * trackH));
+                    int thumbY = 6 + (int)((float)scrollOffset / maxScrollOffset * (trackH - thumbH));
+                    e.Graphics.FillRectangle(b, pnlContent.Width - 5, thumbY, 3, thumbH);
+                }
             }
         }
 
@@ -432,16 +520,28 @@ namespace PasteImageAsFile
             }
 
             Screen scr = Screen.PrimaryScreen;
-            int y = CalculateShelfY(scr);
-            int x = IsPositionOnLeft() ? scr.WorkingArea.Left : (scr.WorkingArea.Right - CollapsedWidth);
-
-            this.Size = new Size(CollapsedWidth, ShelfHeight);
-            this.Location = new Point(x, y);
             this.isExpanded = false;
             pnlHeader.Visible = false;
             dropHint.Visible = false;
             pnlContent.Visible = false;
-            btnCollapse.Text = IsPositionOnLeft() ? "‹" : "›";
+
+            if (IsHorizontalPosition())
+            {
+                int x = scr.WorkingArea.Left + (scr.WorkingArea.Width - CollapsedBarLength) / 2;
+                int y = IsPositionTop() ? scr.WorkingArea.Top : (scr.WorkingArea.Bottom - CollapsedBarThickness);
+                this.Size = new Size(CollapsedBarLength, CollapsedBarThickness);
+                this.Location = new Point(x, y);
+                btnCollapse.Text = IsPositionTop() ? "▲" : "▼";
+            }
+            else
+            {
+                int y = CalculateShelfY(scr) + (ShelfHeightVertical - CollapsedBarLength) / 2;
+                int x = IsPositionOnLeft() ? scr.WorkingArea.Left : (scr.WorkingArea.Right - CollapsedBarThickness);
+                this.Size = new Size(CollapsedBarThickness, CollapsedBarLength);
+                this.Location = new Point(x, y);
+                btnCollapse.Text = IsPositionOnLeft() ? "‹" : "›";
+            }
+
             this.Visible = true;
             this.Invalidate();
         }
@@ -455,16 +555,47 @@ namespace PasteImageAsFile
             GetCursorPos(out pt);
             Screen scr = Screen.FromPoint(new Point(pt.x, pt.y));
 
-            int y = CalculateShelfY(scr);
-            int x = IsPositionOnLeft() ? scr.WorkingArea.Left : (scr.WorkingArea.Right - ExpandedWidth);
-
-            this.Location = new Point(x, y);
-            this.Size = new Size(ExpandedWidth, ShelfHeight);
             this.isExpanded = true;
+
+            if (IsHorizontalPosition())
+            {
+                int w = ExpandedWidthHorizontal;
+                int h = ShelfHeightHorizontal;
+                int x = scr.WorkingArea.Left + (scr.WorkingArea.Width - w) / 2;
+                int y = IsPositionTop() ? scr.WorkingArea.Top : (scr.WorkingArea.Bottom - h);
+
+                this.Location = new Point(x, y);
+                this.Size = new Size(w, h);
+                btnCollapse.Text = IsPositionTop() ? "▲" : "▼";
+
+                pnlHeader.Size = new Size(w, 38);
+                dropHint.Location = new Point(8, 42);
+                dropHint.Size = new Size(w - 16, 32);
+                pnlContent.Location = new Point(0, 78);
+                pnlContent.Size = new Size(w, h - 80);
+            }
+            else
+            {
+                int w = ExpandedWidthVertical;
+                int h = ShelfHeightVertical;
+                int y = CalculateShelfY(scr);
+                int x = IsPositionOnLeft() ? scr.WorkingArea.Left : (scr.WorkingArea.Right - w);
+
+                this.Location = new Point(x, y);
+                this.Size = new Size(w, h);
+                btnCollapse.Text = IsPositionOnLeft() ? "‹" : "›";
+
+                pnlHeader.Size = new Size(w, 38);
+                dropHint.Location = new Point(8, 42);
+                dropHint.Size = new Size(w - 16, 34);
+                pnlContent.Location = new Point(0, 80);
+                pnlContent.Size = new Size(w, h - 84);
+            }
+
+            LayoutHeaderControls();
             pnlHeader.Visible = true;
             dropHint.Visible = true;
             pnlContent.Visible = true;
-            btnCollapse.Text = IsPositionOnLeft() ? "‹" : "›";
 
             RefreshItems();
             this.BringToFront();
@@ -493,11 +624,33 @@ namespace PasteImageAsFile
 
             int sens = Math.Max(20, Config.SuperHubSensitivity);
             bool isLeftDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
-            bool onLeft = IsPositionOnLeft();
 
-            bool nearEdge = onLeft
-                ? (cur.X <= scr.WorkingArea.Left + sens && cur.Y >= scr.WorkingArea.Top + 40 && cur.Y <= scr.WorkingArea.Bottom - 40)
-                : (cur.X >= scr.WorkingArea.Right - sens && cur.Y >= scr.WorkingArea.Top + 40 && cur.Y <= scr.WorkingArea.Bottom - 40);
+            // Логика приближения: только непосредственно в районе ярлычка полки
+            bool nearEdge = false;
+            if (IsHorizontalPosition())
+            {
+                int midX = this.Left + this.Width / 2;
+                if (IsPositionTop())
+                {
+                    nearEdge = (cur.Y <= scr.WorkingArea.Top + sens && Math.Abs(cur.X - midX) <= 120);
+                }
+                else
+                {
+                    nearEdge = (cur.Y >= scr.WorkingArea.Bottom - sens && Math.Abs(cur.X - midX) <= 120);
+                }
+            }
+            else
+            {
+                int midY = this.Top + this.Height / 2;
+                if (IsPositionOnLeft())
+                {
+                    nearEdge = (cur.X <= scr.WorkingArea.Left + sens && Math.Abs(cur.Y - midY) <= 120);
+                }
+                else
+                {
+                    nearEdge = (cur.X >= scr.WorkingArea.Right - sens && Math.Abs(cur.Y - midY) <= 120);
+                }
+            }
 
             bool isOverUs = this.Bounds.Contains(cur);
 
@@ -508,7 +661,7 @@ namespace PasteImageAsFile
 
             if (!isExpanded)
             {
-                // Если идет операция перетаскивания (зажата мышь) у края экрана, или курсор над ярлычком
+                // Раскрытие: только если курсор над самим видимым ярлычком или зажата мышь вблизи ярлычка
                 if ((isLeftDown && nearEdge) || isOverUs)
                 {
                     ExpandShelf();
@@ -516,7 +669,7 @@ namespace PasteImageAsFile
             }
             else
             {
-                // Если развернуто, но курсор ушел и кнопка не зажата
+                // Сворачивание при уходе мыши
                 if (!isPinned && !isOverUs && !isLeftDown)
                 {
                     if ((DateTime.UtcNow - lastPointerInside).TotalMilliseconds > 650)
@@ -555,15 +708,21 @@ namespace PasteImageAsFile
                 if (e.Data.GetDataPresent(DataFormats.FileDrop))
                 {
                     string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
-                    ClipboardHistoryManager.Instance.AddCustomSuperHubItem(files, null);
-                    RefreshItems();
+                    if (files != null && files.Length > 0)
+                    {
+                        ClipboardHistoryManager.Instance.AddCustomSuperHubItem(files, null);
+                    }
                 }
                 else if (e.Data.GetDataPresent(DataFormats.UnicodeText))
                 {
-                    string t = (string)e.Data.GetData(DataFormats.UnicodeText);
-                    ClipboardHistoryManager.Instance.AddCustomSuperHubItem(null, t);
-                    RefreshItems();
+                    string txt = (string)e.Data.GetData(DataFormats.UnicodeText);
+                    if (!string.IsNullOrEmpty(txt))
+                    {
+                        ClipboardHistoryManager.Instance.AddCustomSuperHubItem(null, txt);
+                    }
                 }
+
+                RefreshItems();
             }
             catch (Exception ex)
             {
@@ -573,170 +732,169 @@ namespace PasteImageAsFile
 
         public void RefreshItems()
         {
-            cardsList.SuspendLayout();
+            if (!isExpanded) return;
+
+            var items = ClipboardHistoryManager.Instance.GetItems(null, true);
+            lblTitle.Text = string.Format("📦 SuperHub [{0}]", items.Count);
+            LayoutHeaderControls();
+
             cardsList.Controls.Clear();
+            scrollOffset = 0;
 
-            var list = ClipboardHistoryManager.Instance.GetItems(null, true);
-            lblTitle.Text = "📦 SuperHub [" + list.Count + "]";
+            bool isHorizontal = IsHorizontalPosition();
+            int curPos = 0;
 
-            int itemY = 4;
-            int itemW = cardsList.Width;
-
-            if (list.Count == 0)
+            if (isHorizontal)
             {
-                Label empty = new Label
+                // Горизонтальный ряд карточек
+                cardsList.Top = 4;
+                cardsList.Left = 8;
+                cardsList.Height = pnlContent.Height - 12;
+
+                foreach (var item in items)
                 {
-                    Text = "Полка пуста.\nПеретащите файлы сюда.",
-                    ForeColor = ThemeHelper.TextSecondary,
-                    Font = new Font("Segoe UI", 8.5f),
-                    TextAlign = ContentAlignment.MiddleCenter,
-                    Size = new Size(itemW, 100),
-                    Location = new Point(0, 20)
-                };
-                cardsList.Controls.Add(empty);
-                cardsList.Height = 150;
+                    Panel card = CreateCardControlHorizontal(item, curPos, 0, 190, cardsList.Height - 8);
+                    cardsList.Controls.Add(card);
+                    curPos += card.Width + 8;
+                }
+
+                cardsList.Width = Math.Max(pnlContent.Width - 16, curPos);
+                maxScrollOffset = Math.Max(0, cardsList.Width - pnlContent.Width + 16);
             }
             else
             {
-                foreach (var item in list)
+                // Вертикальный список карточек
+                cardsList.Left = 8;
+                cardsList.Top = 0;
+                cardsList.Width = pnlContent.Width - 18;
+
+                foreach (var item in items)
                 {
-                    var card = CreateShelfCard(item, itemW);
-                    card.Location = new Point(0, itemY);
+                    Panel card = CreateCardControlVertical(item, 0, curPos, cardsList.Width, 54);
                     cardsList.Controls.Add(card);
-                    itemY += card.Height + 6;
+                    curPos += card.Height + 6;
                 }
-                cardsList.Height = itemY + 8;
+
+                cardsList.Height = Math.Max(pnlContent.Height, curPos);
+                maxScrollOffset = Math.Max(0, cardsList.Height - pnlContent.Height);
             }
 
-            maxScrollY = Math.Max(0, cardsList.Height - pnlContent.Height);
-            if (scrollY > maxScrollY) scrollY = maxScrollY;
-            cardsList.Top = -scrollY;
-
-            cardsList.ResumeLayout(true);
             pnlContent.Invalidate();
-
-            // Повторно регистрируем Drop на новые карточки
-            RegisterDropTarget(cardsList);
         }
 
-        private Control CreateShelfCard(ClipboardItem item, int width)
+        private Panel CreateCardControlVertical(ClipboardItem item, int x, int y, int w, int h)
         {
             Panel card = new Panel
             {
-                Size = new Size(width, 48),
+                Location = new Point(x, y),
+                Size = new Size(w, h),
                 BackColor = ThemeHelper.CardBackground,
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                AllowDrop = true
             };
 
             card.Paint += (s, e) => {
                 using (var pen = new Pen(ThemeHelper.CardBorder, 1))
                 {
-                    e.Graphics.DrawRectangle(pen, 0, 0, card.Width - 1, card.Height - 1);
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    Rectangle rect = new Rectangle(0, 0, card.Width - 1, card.Height - 1);
+                    using (var path = CreateRoundedPath(rect, 4))
+                    {
+                        e.Graphics.DrawPath(pen, path);
+                    }
                 }
             };
 
-            // Иконка слева
+            string title = "";
+            string sub = "";
+            Image iconImg = null;
+            string targetPath = null;
+
+            if (item.Type == ClipboardItemType.Image)
+            {
+                title = Path.GetFileName(item.ImagePath ?? "Снимок");
+                sub = "Изображение";
+                targetPath = item.ImagePath;
+                if (SafeFileExists(item.ImagePath)) iconImg = FileIconHelper.GetIconForPath(item.ImagePath);
+            }
+            else if (item.Type == ClipboardItemType.Files && item.FilePaths != null && item.FilePaths.Count > 0)
+            {
+                targetPath = item.FilePaths[0];
+                title = Path.GetFileName(targetPath);
+                sub = (item.FilePaths.Count > 1) ? ("Файлов: " + item.FilePaths.Count) : "Файл";
+                if (SafeFileExists(targetPath) || SafeDirectoryExists(targetPath)) iconImg = FileIconHelper.GetIconForPath(targetPath);
+            }
+            else
+            {
+                title = (item.TextContent ?? "").Replace("\r", "").Replace("\n", " ");
+                sub = "Текст";
+            }
+
+            // Иконка
             PictureBox pic = new PictureBox
             {
-                Location = new Point(6, 8),
+                Location = new Point(8, 10),
                 Size = new Size(32, 32),
                 SizeMode = PictureBoxSizeMode.Zoom,
                 BackColor = Color.Transparent,
                 Cursor = Cursors.Hand
             };
-
-            string title = "";
-            string sub = "";
-            string targetPath = null;
-
-            if (item.Type == ClipboardItemType.Image && SafeFileExists(item.ImagePath))
-            {
-                targetPath = item.ImagePath;
-                title = SafeGetFileName(item.ImagePath);
-                sub = (item.FileSizeBytes / 1024) + " КБ";
-                try
-                {
-                    using (var fs = new FileStream(item.ImagePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                    using (var img = Image.FromStream(fs))
-                    {
-                        pic.Image = new Bitmap(img);
-                    }
-                }
-                catch {}
-            }
-            else if (item.Type == ClipboardItemType.Files && item.FilePaths != null && item.FilePaths.Count > 0)
-            {
-                targetPath = item.FilePaths[0];
-                title = SafeGetFileName(targetPath);
-                sub = item.FilePaths.Count > 1 ? ("и еще " + (item.FilePaths.Count - 1) + " файлов") : (SafeDirectoryExists(targetPath) ? "Папка" : "Файл");
-                pic.Image = FileIconHelper.GetIconForPath(targetPath);
-            }
-            else
-            {
-                title = item.TextContent ?? "";
-                if (title.Length > 25) title = title.Substring(0, 25) + "...";
-                sub = "Текст • " + (item.TextContent != null ? item.TextContent.Length : 0) + " симв.";
-                pic.Image = SystemIcons.Information.ToBitmap();
-            }
-
+            if (iconImg != null) pic.Image = iconImg;
+            else pic.Image = SystemIcons.Application.ToBitmap();
             card.Controls.Add(pic);
 
+            // Заголовок
             Label lblName = new Label
             {
                 Text = title,
                 Font = new Font("Segoe UI Semibold", 8.5f, FontStyle.Bold),
                 ForeColor = ThemeHelper.TextPrimary,
-                Location = new Point(44, 6),
-                Size = new Size(card.Width - 72, 18),
+                Location = new Point(44, 8),
+                Size = new Size(card.Width - 94, 18),
                 AutoEllipsis = true,
                 Cursor = Cursors.Hand
             };
             card.Controls.Add(lblName);
 
+            // Подзаголовок
             Label lblSub = new Label
             {
                 Text = sub,
                 Font = new Font("Segoe UI", 7.5f),
                 ForeColor = ThemeHelper.TextSecondary,
-                Location = new Point(44, 26),
-                Size = new Size(card.Width - 72, 16),
+                Location = new Point(44, 28),
+                Size = new Size(card.Width - 94, 16),
                 AutoEllipsis = true,
                 Cursor = Cursors.Hand
             };
             card.Controls.Add(lblSub);
 
+            // Кнопка предпросмотра [👁]
+            Button btnView = CreateToolButton("👁", card.Width - 48, 14, 22, 24, "Просмотр содержимого файла или текста");
+            btnView.Click += (s, e) => ItemViewerForm.ShowViewer(item, targetPath);
+            card.Controls.Add(btnView);
+
             // Кнопка удаления [✕]
-            Button btnRemove = new Button
-            {
-                Text = "✕",
-                Location = new Point(card.Width - 24, 12),
-                Size = new Size(20, 22),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.Transparent,
-                ForeColor = ThemeHelper.TextSecondary,
-                Font = new Font("Segoe UI", 7.5f),
-                Cursor = Cursors.Hand
-            };
-            btnRemove.FlatAppearance.BorderSize = 0;
+            Button btnRemove = CreateToolButton("✕", card.Width - 26, 14, 22, 24, "Убрать файл с полки SuperHub");
             btnRemove.MouseEnter += (s, e) => { btnRemove.BackColor = Color.FromArgb(196, 43, 28); btnRemove.ForeColor = Color.White; };
             btnRemove.MouseLeave += (s, e) => { btnRemove.BackColor = Color.Transparent; btnRemove.ForeColor = ThemeHelper.TextSecondary; };
             btnRemove.Click += (s, e) => {
                 ClipboardHistoryManager.Instance.ToggleSuperHub(item.Id);
                 RefreshItems();
             };
-            toolTip.SetToolTip(btnRemove, "Убрать файл с полки SuperHub");
             card.Controls.Add(btnRemove);
 
-            // Контекстное меню по правому клику
+            // Контекстное меню
             ContextMenu cardMenu = new ContextMenu();
+            cardMenu.MenuItems.Add(new MenuItem("👁 Просмотр / Детали", (s, e) => ItemViewerForm.ShowViewer(item, targetPath)));
             if (!string.IsNullOrEmpty(targetPath) && (SafeFileExists(targetPath) || SafeDirectoryExists(targetPath)))
             {
-                cardMenu.MenuItems.Add(new MenuItem("▷ Открыть", (s, e) => LaunchFile(targetPath)));
+                cardMenu.MenuItems.Add(new MenuItem("▷ Открыть в системе", (s, e) => LaunchFile(targetPath)));
                 cardMenu.MenuItems.Add(new MenuItem("📁 Показать в Проводнике", (s, e) => ShowInExplorer(targetPath)));
                 cardMenu.MenuItems.Add(new MenuItem("-"));
             }
-            cardMenu.MenuItems.Add(new MenuItem("📋 Скопировать", (s, e) => CopyItem(item)));
-            cardMenu.MenuItems.Add(new MenuItem("🗑️ Удалить с полки", (s, e) => {
+            cardMenu.MenuItems.Add(new MenuItem("📋 Скопировать в буфер", (s, e) => CopyItem(item)));
+            cardMenu.MenuItems.Add(new MenuItem("🗑 Удалить с полки", (s, e) => {
                 ClipboardHistoryManager.Instance.ToggleSuperHub(item.Id);
                 RefreshItems();
             }));
@@ -748,17 +906,15 @@ namespace PasteImageAsFile
                 c.MouseEnter += (s, e) => card.BackColor = ThemeHelper.CardHover;
                 c.MouseLeave += (s, e) => card.BackColor = ThemeHelper.CardBackground;
 
-                // Двойной клик открывает файл
                 c.DoubleClick += (s, e) => {
-                    if (c != btnRemove && !string.IsNullOrEmpty(targetPath))
+                    if (c != btnRemove && c != btnView)
                     {
-                        LaunchFile(targetPath);
+                        ItemViewerForm.ShowViewer(item, targetPath);
                     }
                 };
 
-                // Запуск Drag out наружу
                 c.MouseDown += (s, e) => {
-                    if (e.Button == MouseButtons.Left && c != btnRemove)
+                    if (e.Button == MouseButtons.Left && c != btnRemove && c != btnView)
                     {
                         StartDragOut(item, card);
                     }
@@ -768,8 +924,154 @@ namespace PasteImageAsFile
             };
             attachEvents(card);
 
-            toolTip.SetToolTip(card, "Двойной клик: открыть файл\nЗажать и потянуть: перетащить наружу (" + (Config.SuperHubDragMode == "Move" ? "Перемещение" : "Копирование") + ")");
+            toolTip.SetToolTip(card, "Двойной клик: предпросмотр\nЗажать и потянуть: перетащить наружу (" + (Config.SuperHubDragMode == "Move" ? "Перемещение" : "Копирование") + ")");
+            return card;
+        }
 
+        private Panel CreateCardControlHorizontal(ClipboardItem item, int x, int y, int w, int h)
+        {
+            Panel card = new Panel
+            {
+                Location = new Point(x, y),
+                Size = new Size(w, h),
+                BackColor = ThemeHelper.CardBackground,
+                Cursor = Cursors.Hand,
+                AllowDrop = true
+            };
+
+            card.Paint += (s, e) => {
+                using (var pen = new Pen(ThemeHelper.CardBorder, 1))
+                {
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    Rectangle rect = new Rectangle(0, 0, card.Width - 1, card.Height - 1);
+                    using (var path = CreateRoundedPath(rect, 4))
+                    {
+                        e.Graphics.DrawPath(pen, path);
+                    }
+                }
+            };
+
+            string title = "";
+            string sub = "";
+            Image iconImg = null;
+            string targetPath = null;
+
+            if (item.Type == ClipboardItemType.Image)
+            {
+                title = Path.GetFileName(item.ImagePath ?? "Снимок");
+                sub = "Изображение";
+                targetPath = item.ImagePath;
+                if (SafeFileExists(item.ImagePath)) iconImg = FileIconHelper.GetIconForPath(item.ImagePath);
+            }
+            else if (item.Type == ClipboardItemType.Files && item.FilePaths != null && item.FilePaths.Count > 0)
+            {
+                targetPath = item.FilePaths[0];
+                title = Path.GetFileName(targetPath);
+                sub = (item.FilePaths.Count > 1) ? ("Файлов: " + item.FilePaths.Count) : "Файл";
+                if (SafeFileExists(targetPath) || SafeDirectoryExists(targetPath)) iconImg = FileIconHelper.GetIconForPath(targetPath);
+            }
+            else
+            {
+                title = (item.TextContent ?? "").Replace("\r", "").Replace("\n", " ");
+                sub = "Текст";
+            }
+
+            // Иконка по центру вверху
+            PictureBox pic = new PictureBox
+            {
+                Location = new Point((card.Width - 36) / 2, 10),
+                Size = new Size(36, 36),
+                SizeMode = PictureBoxSizeMode.Zoom,
+                BackColor = Color.Transparent,
+                Cursor = Cursors.Hand
+            };
+            if (iconImg != null) pic.Image = iconImg;
+            else pic.Image = SystemIcons.Application.ToBitmap();
+            card.Controls.Add(pic);
+
+            // Кнопка удаления [✕] в правом верхнем углу
+            Button btnRemove = CreateToolButton("✕", card.Width - 24, 4, 20, 20, "Убрать файл с полки");
+            btnRemove.MouseEnter += (s, e) => { btnRemove.BackColor = Color.FromArgb(196, 43, 28); btnRemove.ForeColor = Color.White; };
+            btnRemove.MouseLeave += (s, e) => { btnRemove.BackColor = Color.Transparent; btnRemove.ForeColor = ThemeHelper.TextSecondary; };
+            btnRemove.Click += (s, e) => {
+                ClipboardHistoryManager.Instance.ToggleSuperHub(item.Id);
+                RefreshItems();
+            };
+            card.Controls.Add(btnRemove);
+
+            // Кнопка предпросмотра [👁] в левом верхнем углу
+            Button btnView = CreateToolButton("👁", 4, 4, 20, 20, "Просмотр содержимого");
+            btnView.Click += (s, e) => ItemViewerForm.ShowViewer(item, targetPath);
+            card.Controls.Add(btnView);
+
+            // Заголовок
+            Label lblName = new Label
+            {
+                Text = title,
+                Font = new Font("Segoe UI Semibold", 8f, FontStyle.Bold),
+                ForeColor = ThemeHelper.TextPrimary,
+                Location = new Point(6, 52),
+                Size = new Size(card.Width - 12, 18),
+                TextAlign = ContentAlignment.MiddleCenter,
+                AutoEllipsis = true,
+                Cursor = Cursors.Hand
+            };
+            card.Controls.Add(lblName);
+
+            // Подзаголовок
+            Label lblSub = new Label
+            {
+                Text = sub,
+                Font = new Font("Segoe UI", 7.5f),
+                ForeColor = ThemeHelper.TextSecondary,
+                Location = new Point(6, 72),
+                Size = new Size(card.Width - 12, 16),
+                TextAlign = ContentAlignment.MiddleCenter,
+                AutoEllipsis = true,
+                Cursor = Cursors.Hand
+            };
+            card.Controls.Add(lblSub);
+
+            // Контекстное меню
+            ContextMenu cardMenu = new ContextMenu();
+            cardMenu.MenuItems.Add(new MenuItem("👁 Просмотр / Детали", (s, e) => ItemViewerForm.ShowViewer(item, targetPath)));
+            if (!string.IsNullOrEmpty(targetPath) && (SafeFileExists(targetPath) || SafeDirectoryExists(targetPath)))
+            {
+                cardMenu.MenuItems.Add(new MenuItem("▷ Открыть в системе", (s, e) => LaunchFile(targetPath)));
+                cardMenu.MenuItems.Add(new MenuItem("📁 Показать в Проводнике", (s, e) => ShowInExplorer(targetPath)));
+                cardMenu.MenuItems.Add(new MenuItem("-"));
+            }
+            cardMenu.MenuItems.Add(new MenuItem("📋 Скопировать в буфер", (s, e) => CopyItem(item)));
+            cardMenu.MenuItems.Add(new MenuItem("🗑 Удалить с полки", (s, e) => {
+                ClipboardHistoryManager.Instance.ToggleSuperHub(item.Id);
+                RefreshItems();
+            }));
+            card.ContextMenu = cardMenu;
+
+            Action<Control> attachEvents = null;
+            attachEvents = (c) => {
+                c.MouseEnter += (s, e) => card.BackColor = ThemeHelper.CardHover;
+                c.MouseLeave += (s, e) => card.BackColor = ThemeHelper.CardBackground;
+
+                c.DoubleClick += (s, e) => {
+                    if (c != btnRemove && c != btnView)
+                    {
+                        ItemViewerForm.ShowViewer(item, targetPath);
+                    }
+                };
+
+                c.MouseDown += (s, e) => {
+                    if (e.Button == MouseButtons.Left && c != btnRemove && c != btnView)
+                    {
+                        StartDragOut(item, card);
+                    }
+                };
+
+                foreach (Control subCtrl in c.Controls) attachEvents(subCtrl);
+            };
+            attachEvents(card);
+
+            toolTip.SetToolTip(card, "Двойной клик: предпросмотр\nЗажать и потянуть: перетащить наружу (" + (Config.SuperHubDragMode == "Move" ? "Перемещение" : "Копирование") + ")");
             return card;
         }
 
@@ -879,12 +1181,11 @@ namespace PasteImageAsFile
                 if (sc.Count > 0)
                 {
                     DataObject data = new DataObject();
-                    data.SetFileDropList(sc);
-
                     bool isMove = string.Equals(Config.SuperHubDragMode, "Move", StringComparison.OrdinalIgnoreCase);
                     byte dropEffectVal = (byte)(isMove ? 2 : 1);
                     var dropEffectStream = new MemoryStream(new byte[] { dropEffectVal, 0, 0, 0 });
                     data.SetData("Preferred DropEffect", dropEffectStream);
+                    data.SetFileDropList(sc);
 
                     DragDropEffects allowedEffects = isMove ? (DragDropEffects.Move | DragDropEffects.Copy) : DragDropEffects.Copy;
                     this.DoDragDrop(data, allowedEffects);
@@ -896,31 +1197,28 @@ namespace PasteImageAsFile
             }
         }
 
-        private static string SafeGetFileName(string path)
+        private static GraphicsPath CreateRoundedPath(Rectangle rect, int radius)
         {
-            if (string.IsNullOrEmpty(path)) return "";
-            try { return Path.GetFileName(path); }
-            catch
-            {
-                try
-                {
-                    int idx = Math.Max(path.LastIndexOf('\\'), path.LastIndexOf('/'));
-                    return idx >= 0 && idx < path.Length - 1 ? path.Substring(idx + 1) : path;
-                }
-                catch { return path; }
-            }
-        }
-
-        private static bool SafeDirectoryExists(string path)
-        {
-            if (string.IsNullOrEmpty(path)) return false;
-            try { return Directory.Exists(path); } catch { return false; }
+            GraphicsPath path = new GraphicsPath();
+            int d = radius * 2;
+            path.AddArc(rect.X, rect.Y, d, d, 180, 90);
+            path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
+            path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+            path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
         }
 
         private static bool SafeFileExists(string path)
         {
-            if (string.IsNullOrEmpty(path)) return false;
-            try { return File.Exists(path); } catch { return false; }
+            try { return !string.IsNullOrEmpty(path) && File.Exists(path); }
+            catch { return false; }
+        }
+
+        private static bool SafeDirectoryExists(string path)
+        {
+            try { return !string.IsNullOrEmpty(path) && Directory.Exists(path); }
+            catch { return false; }
         }
     }
 }

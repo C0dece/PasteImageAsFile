@@ -144,7 +144,14 @@ namespace PasteImageAsFile
                     IntPtr prevFg = GetForegroundWindow();
                     DesktopHelper.POINT curPt;
                     DesktopHelper.TryGetCursorPosition(out curPt);
-                    ClipboardFlyoutForm.ShowFlyout(new Point(curPt.x, curPt.y), prevFg);
+                    Point pt = new Point(curPt.x, curPt.y);
+                    Screen scr = Screen.FromPoint(pt);
+                    if (prevFg == IntPtr.Zero || Program.IsTaskbarOrTrayWindow(prevFg))
+                    {
+                        IntPtr userWnd = Program.FindLastActiveUserWindow(scr);
+                        if (userWnd != IntPtr.Zero) prevFg = userWnd;
+                    }
+                    ClipboardFlyoutForm.ShowFlyout(pt, prevFg);
                 }
                 catch (Exception ex)
                 {

@@ -337,9 +337,18 @@ namespace PasteImageAsFile
                     BackColor = Color.Transparent,
                     ForeColor = (i == currentTabIndex) ? Color.White : Color.FromArgb(160, 160, 160),
                     Font = new Font("Segoe UI", 9f, (i == currentTabIndex) ? FontStyle.Bold : FontStyle.Regular),
-                    Cursor = Cursors.Hand
+                    Cursor = Cursors.Hand,
+                    TabStop = false
                 };
                 btnTab.FlatAppearance.BorderSize = 0;
+                btnTab.FlatAppearance.MouseOverBackColor = Color.FromArgb(45, 45, 45);
+                btnTab.FlatAppearance.MouseDownBackColor = Color.FromArgb(55, 55, 55);
+                btnTab.MouseEnter += (s, e) => {
+                    btnTab.ForeColor = ThemeHelper.TextPrimary;
+                };
+                btnTab.MouseLeave += (s, e) => {
+                    btnTab.ForeColor = (idx == currentTabIndex) ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary;
+                };
                 btnTab.Click += (s, e) => SwitchTab(idx);
 
                 navTabButtons.Add(btnTab);
@@ -638,7 +647,9 @@ namespace PasteImageAsFile
                 "Справа внизу",
                 "Слева по центру",
                 "Слева вверху",
-                "Слева внизу"
+                "Слева внизу",
+                "Сверху по центру",
+                "Снизу по центру"
             });
             cmbSuperHubPosition.SelectedIndexChanged += (s, e) => {
                 switch (cmbSuperHubPosition.SelectedIndex)
@@ -649,6 +660,8 @@ namespace PasteImageAsFile
                     case 3: Config.SuperHubPosition = "LeftCenter"; break;
                     case 4: Config.SuperHubPosition = "LeftTop"; break;
                     case 5: Config.SuperHubPosition = "LeftBottom"; break;
+                    case 6: Config.SuperHubPosition = "TopCenter"; break;
+                    case 7: Config.SuperHubPosition = "BottomCenter"; break;
                 }
                 SuperHubDockForm.Instance.PositionCollapsed();
             };
@@ -1001,6 +1014,8 @@ namespace PasteImageAsFile
             else if (string.Equals(pos, "LeftCenter", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 3;
             else if (string.Equals(pos, "LeftTop", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 4;
             else if (string.Equals(pos, "LeftBottom", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 5;
+            else if (string.Equals(pos, "TopCenter", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 6;
+            else if (string.Equals(pos, "BottomCenter", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 7;
             else cmbSuperHubPosition.SelectedIndex = 0;
 
             bool isMove = string.Equals(Config.SuperHubDragMode, "Move", StringComparison.OrdinalIgnoreCase);

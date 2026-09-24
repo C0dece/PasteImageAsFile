@@ -16,16 +16,18 @@
 - `src/Program.cs`: Точка входа, IPC, трей-меню, поиск активных пользовательских окон и маршрутизация команд.
 - `src/ClipboardWatcher.cs`: Отслеживание изменений буфера обмена (`AddClipboardFormatListener`), дополнение формата `FileDropList`, FileSystemWatcher для рабочего стола.
 - `src/ClipboardHistoryManager.cs`: Хранилище истории буфера обмена и полки SuperHub (сохранение в `history.json`).
-- `src/ClipboardFlyoutForm.cs`: Пользовательский интерфейс буфера обмена в стиле Fluent Windows 11 (вкладки Все, Снимки, Текст, Файлы, SuperHub, поиск, кастомный темный скроллбар, режимы Вставить [Ctrl+V] и Копировать).
-- `src/SuperHubDockForm.cs`: Плавающая полка SuperHub (авто-выдвижение у края экрана при Drag-and-Drop, режимы Copy vs Move с Preferred DropEffect, выгрузка всех файлов сразу кнопкой `📦`).
+- `src/ClipboardFlyoutForm.cs`: Пользовательский интерфейс буфера обмена в стиле Fluent Windows 11 (вкладки Все, Снимки, Текст, Файлы, SuperHub, поиск с векторной лупой, свободный ресайз за границы и углы с сохранением в реестр, кастомный темный скроллбар, режимы Вставить [Ctrl+V] и Копировать, кнопка предпросмотра [👁]).
+- `src/ItemViewerForm.cs`: Окно детального просмотра (зум колесиком мыши 10%-500%, панорамирование картинок, кнопка булавки [📌] поверх всех окон, извлечение чистого текста из .docx/.doc через DeflateStream, выделение и частичное копирование текста).
+- `src/SuperHubDockForm.cs`: Плавающая полка SuperHub (компактный ярлычок без дымки и перехвата кликов, авто-выдвижение у края экрана при Drag-and-Drop или наведении, вертикальный [320x480] и горизонтальный [580x210] режимы, режимы Copy vs Move с Preferred DropEffect, выгрузка всех файлов сразу кнопкой `📦`).
 - `src/ThemeHelper.cs`: Определение системной темы Windows (`AppsUseLightTheme`), события `ThemeChanged`, палитра цветов для Dark и Light режимов.
-- `src/Config.cs`: Управление конфигурацией в реестре (`HKCU\Software\PasteImageAsFile`).
+- `src/Config.cs`: Управление конфигурацией в реестре (`HKCU\Software\PasteImageAsFile`), включая размеры окна буфера (ширина/высота).
 - `src/DesktopHelper.cs`: Позиционирование файлов на рабочем столе под курсором через IFolderView / IShellFolder.
 - `src/FileIconHelper.cs`: Извлечение системных иконок для файлов через `SHGetFileInfo`.
-- `src/MainForm.cs`: Окно управления и настроек (вкладки Основные, Буфер обмена, SuperHub).
+- `src/MainForm.cs`: Окно управления и настроек (вкладки Основные, Буфер обмена, SuperHub с позициями сверху/снизу/справа/слева).
 - `src/ShellIntegration.cs`: Интеграция с Проводником и автозапуском реестра.
 
 ## 4. Важные ограничения и соглашения
 - **Синтаксис C# 5**: Не использовать expression-bodied properties (`=>`), строковую интерполяцию (`$""`), операторы `?.` - компилятор .NET 4.0 их не поддерживает.
 - **Безопасные пути**: Для любых путей файлов обязательно использовать `SafeGetFileName`, `SafeFileExists`, `SafeDirectoryExists` во избежание `ArgumentException` на непечатных символах заголовков окон.
 - **Целостность файлов**: При Drag-and-Drop из SuperHub по умолчанию включен режим Copy (`DragDropEffects.Copy` и `Preferred DropEffect = 1`), чтобы проводник не удалял оригиналы файлов.
+- **Фокус ввода и вставка**: Для передачи ввода в целевое окно используется `Program.ForceForegroundWindow(targetWnd)` (холостой Alt tap, `AttachThreadInput`, `BringWindowToTop`, `ShowWindow(SW_RESTORE)`). Если окно буфера закреплено, оно не скрывается, а целевое окно сохраняет фокус для непрерывного набора текста.
