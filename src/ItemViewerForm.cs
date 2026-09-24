@@ -238,8 +238,8 @@ namespace PasteImageAsFile
             };
             pnlHeader.Controls.Add(lblSubtitle);
 
-            // Кнопка [📌] Закрепить
-            btnPin = CreateHeaderButton("📌 Закрепить", this.Width - 200, 8, 100, 28, "Закрепить окно поверх остальных (чтобы постоянно видеть)");
+            // Кнопка Закрепить
+            btnPin = CreateHeaderButton("Закрепить", this.Width - 190, 8, 86, 28, "Закрепить окно поверх остальных (чтобы постоянно видеть)");
             btnPin.MouseEnter += (s, e) => {
                 if (!isPinned) btnPin.BackColor = ThemeHelper.ButtonHover;
             };
@@ -253,17 +253,26 @@ namespace PasteImageAsFile
             };
             pnlHeader.Controls.Add(btnPin);
 
-            // Кнопка [📋] Скопировать
-            btnCopy = CreateHeaderButton("📋", this.Width - 92, 8, 32, 28, "Скопировать содержимое в буфер обмена");
+            // Кнопка Копия
+            btnCopy = CreateHeaderButton("Копия", this.Width - 96, 8, 56, 28, "Скопировать содержимое в буфер обмена");
             btnCopy.Click += (s, e) => CopyContentToClipboard();
             pnlHeader.Controls.Add(btnCopy);
 
             // Кнопка [↗] Открыть в ассоциированной программе
-            btnOpenExternal = CreateHeaderButton("↗", this.Width - 54, 8, 32, 28, "Открыть файл в стандартной программе Windows");
+            btnOpenExternal = CreateHeaderButton("↗", this.Width - 38, 8, 32, 28, "Открыть файл в стандартной программе Windows");
             btnOpenExternal.Click += (s, e) => OpenExternal();
             pnlHeader.Controls.Add(btnOpenExternal);
 
             pnlHeader.Resize += (s, e) => RelayoutHeaderButtons();
+            pnlHeader.Paint += (s, e) => {
+                if (isPinned)
+                {
+                    using (var brush = new SolidBrush(ThemeHelper.Accent))
+                    {
+                        e.Graphics.FillRectangle(brush, 0, pnlHeader.Height - 2, pnlHeader.Width, 2);
+                    }
+                }
+            };
             this.Controls.Add(pnlHeader);
 
             UpdatePinVisual();
@@ -288,19 +297,19 @@ namespace PasteImageAsFile
             this.TopMost = isPinned;
             if (isPinned)
             {
-                btnPin.Text = "📌 Закреплено";
-                btnPin.Width = 114;
+                btnPin.Text = "Закреплено";
+                btnPin.Width = 96;
                 btnPin.BackColor = ThemeHelper.AccentBackground;
                 btnPin.ForeColor = ThemeHelper.Accent;
                 btnPin.Font = new Font("Segoe UI Semibold", 8.5f, FontStyle.Bold);
                 toolTip.SetToolTip(btnPin, "Окно закреплено поверх всех (кликните для открепления)");
-                this.Text = "📌 [Закреплено] " + GetDisplayTitle() + " - PasteImageAsFile";
-                if (lblTitle != null) lblTitle.Text = "📌 " + GetDisplayTitle();
+                this.Text = "[Закреплено] " + GetDisplayTitle() + " - PasteImageAsFile";
+                if (lblTitle != null) lblTitle.Text = GetDisplayTitle();
             }
             else
             {
-                btnPin.Text = "📌 Закрепить";
-                btnPin.Width = 100;
+                btnPin.Text = "Закрепить";
+                btnPin.Width = 86;
                 btnPin.BackColor = Color.Transparent;
                 btnPin.ForeColor = ThemeHelper.TextSecondary;
                 btnPin.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
@@ -309,13 +318,14 @@ namespace PasteImageAsFile
                 if (lblTitle != null) lblTitle.Text = GetDisplayTitle();
             }
             RelayoutHeaderButtons();
+            if (pnlHeader != null) pnlHeader.Invalidate();
         }
 
         private void RelayoutHeaderButtons()
         {
             if (pnlHeader == null || btnOpenExternal == null || btnCopy == null || btnPin == null) return;
-            btnOpenExternal.Left = pnlHeader.Width - 44;
-            btnCopy.Left = pnlHeader.Width - 82;
+            btnOpenExternal.Left = pnlHeader.Width - btnOpenExternal.Width - 8;
+            btnCopy.Left = btnOpenExternal.Left - btnCopy.Width - 6;
             btnPin.Left = btnCopy.Left - btnPin.Width - 8;
             if (lblTitle != null) lblTitle.Width = Math.Max(100, btnPin.Left - 20);
             if (lblSubtitle != null) lblSubtitle.Width = Math.Max(100, btnPin.Left - 20);

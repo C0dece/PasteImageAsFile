@@ -197,7 +197,7 @@ namespace PasteImageAsFile
         public ClipboardItem AddText(string text, string sourceApp)
         {
             if (string.IsNullOrEmpty(text)) return null;
-            text = text.Trim();
+            text = FixMojibake(text.Trim());
             if (text.Length == 0) return null;
 
             lock (fileLock)
@@ -328,7 +328,7 @@ namespace PasteImageAsFile
                     var textItem = new ClipboardItem
                     {
                         Type = ClipboardItemType.Text,
-                        TextContent = text,
+                        TextContent = FixMojibake(text),
                         SourceApp = "SuperHub",
                         IsInSuperHub = true,
                         Timestamp = DateTime.Now
@@ -510,14 +510,14 @@ namespace PasteImageAsFile
                 string ts = ExtractJsonString(chunk, "timestamp");
                 DateTime dt;
                 if (DateTime.TryParse(ts, out dt)) it.Timestamp = dt;
-                it.SourceApp = ExtractJsonString(chunk, "sourceApp") ?? "";
+                it.SourceApp = FixMojibake(ExtractJsonString(chunk, "sourceApp") ?? "");
                 it.IsPinned = ExtractJsonBool(chunk, "isPinned", false);
                 it.IsInSuperHub = ExtractJsonBool(chunk, "isSuperHub", false);
                 it.ImagePath = ExtractJsonString(chunk, "imagePath") ?? "";
                 it.ImageWidth = ExtractJsonInt(chunk, "imageWidth", 0);
                 it.ImageHeight = ExtractJsonInt(chunk, "imageHeight", 0);
                 it.FileSizeBytes = ExtractJsonLong(chunk, "fileSizeBytes", 0);
-                it.TextContent = ExtractJsonString(chunk, "textContent") ?? "";
+                it.TextContent = FixMojibake(ExtractJsonString(chunk, "textContent") ?? "");
 
                 int fpIdx = chunk.IndexOf("\"filePaths\":");
                 if (fpIdx >= 0)
@@ -539,6 +539,25 @@ namespace PasteImageAsFile
                 return it;
             }
             catch { return null; }
+        }
+
+        public static string FixMojibake(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            if (s.IndexOf('Р') >= 0 || s.IndexOf('С') >= 0)
+            {
+                try
+                {
+                    byte[] bytes = Encoding.GetEncoding(1251).GetBytes(s);
+                    string decoded = Encoding.UTF8.GetString(bytes);
+                    if (!decoded.Contains("\ufffd") && decoded.Length < s.Length)
+                    {
+                        return decoded;
+                    }
+                }
+                catch {}
+            }
+            return s;
         }
 
         private static string ExtractJsonString(string json, string key)

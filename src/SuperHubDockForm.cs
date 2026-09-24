@@ -24,6 +24,10 @@ namespace PasteImageAsFile
         [DllImport("dwmapi.dll")]
         static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
+        const int DWMWA_NCRENDERING_POLICY = 2;
+        const int DWMNCRP_DISABLED = 1;
+        const int DWMNCRP_ENABLED = 2;
+
         const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
         const int DWMWCP_ROUND = 2;
         const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
@@ -74,9 +78,14 @@ namespace PasteImageAsFile
 
         // Навигационные вкладки режима "Буфер обмена и SuperHub"
         private Panel pnlTabs;
-        private List<Button> tabButtons = new List<Button>();
-        private readonly string[] tabNames = new string[] { "Все", "Снимки", "Текст", "Файлы", "SuperHub" };
-        private int currentTabIndex = 4; // по умолчанию активна вкладка SuperHub
+        private Button btnMainClipboard;
+        private Button btnMainSuperHub;
+        private int currentMainTab = 1; // 0 = Буфер обмена, 1 = SuperHub
+
+        private Panel pnlSubTabs;
+        private readonly string[] filterNames = new string[] { "Все", "Снимки", "Текст", "Файлы" };
+        private List<Button> filterButtons = new List<Button>();
+        private int currentFilterIndex = 0; // 0 = Все, 1 = Снимки, 2 = Текст, 3 = Файлы
 
         private Panel pnlContent;
         private Panel cardsList;
@@ -294,6 +303,8 @@ namespace PasteImageAsFile
                 DwmSetWindowAttribute(this.Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
                 int dark = ThemeHelper.IsDarkTheme() ? 1 : 0;
                 DwmSetWindowAttribute(this.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+                int ncPolicy = isExpanded ? DWMNCRP_ENABLED : DWMNCRP_DISABLED;
+                DwmSetWindowAttribute(this.Handle, DWMWA_NCRENDERING_POLICY, ref ncPolicy, sizeof(int));
             }
             catch {}
         }
@@ -313,13 +324,16 @@ namespace PasteImageAsFile
             if (pnlTabs != null)
             {
                 pnlTabs.BackColor = ThemeHelper.HeaderBackground;
-                for (int i = 0; i < tabButtons.Count; i++)
-                {
-                    bool active = (i == currentTabIndex);
-                    tabButtons[i].ForeColor = active ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary;
-                }
                 pnlTabs.Invalidate();
             }
+
+            if (pnlSubTabs != null)
+            {
+                pnlSubTabs.BackColor = ThemeHelper.HeaderBackground;
+                pnlSubTabs.Invalidate();
+            }
+
+            UpdateTabsVisual();
 
             if (dropHint != null)
             {
@@ -410,7 +424,7 @@ namespace PasteImageAsFile
 
             lblTitle = new Label
             {
-                Text = "📦 SuperHub",
+                Text = "SuperHub",
                 Font = titleFont,
                 ForeColor = Color.White,
                 Location = new Point(8, 9),
@@ -449,7 +463,7 @@ namespace PasteImageAsFile
             btnClear = CreateToolButton("🗑", 156, 7, 24, 24, "Очистить полку SuperHub (удалить все элементы)");
             btnClear.Click += (s, e) => {
                 bool showTabs = string.Equals(Config.SuperHubViewMode, "Tabs", StringComparison.OrdinalIgnoreCase);
-                bool isHub = (!showTabs || currentTabIndex == 4);
+                bool isHub = (!showTabs || currentMainTab == 1);
                 if (isHub)
                 {
                     if (MessageBox.Show("Очистить все файлы на полке SuperHub?", "SuperHub", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
@@ -461,11 +475,11 @@ namespace PasteImageAsFile
                 else
                 {
                     ClipboardItemType? filter = null;
-                    if (currentTabIndex == 1) filter = ClipboardItemType.Image;
-                    else if (currentTabIndex == 2) filter = ClipboardItemType.Text;
-                    else if (currentTabIndex == 3) filter = ClipboardItemType.Files;
+                    if (currentFilterIndex == 1) filter = ClipboardItemType.Image;
+                    else if (currentFilterIndex == 2) filter = ClipboardItemType.Text;
+                    else if (currentFilterIndex == 3) filter = ClipboardItemType.Files;
 
-                    string cat = tabNames[currentTabIndex];
+                    string cat = filterNames[currentFilterIndex];
                     if (MessageBox.Show("Очистить раздел \"" + cat + "\" журнала буфера обмена?", "Буфер обмена", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                     {
                         ClipboardHistoryManager.Instance.ClearAll(filter, false);
@@ -497,47 +511,52 @@ namespace PasteImageAsFile
             pnlHeader.Resize += (s, e) => LayoutHeaderControls();
             this.Controls.Add(pnlHeader);
 
-            // 2. Панель навигационных вкладок (Все / Снимки / Текст / Файлы / SuperHub) - 30px
+            // 2. Верхний уровень вкладок: [📋 Буфер] и [📦 SuperHub] - 28px
             pnlTabs = new Panel
             {
                 Location = new Point(0, 38),
-                Size = new Size(ExpandedWidthVertical, 30),
+                Size = new Size(ExpandedWidthVertical, 28),
                 BackColor = Color.FromArgb(24, 24, 24),
                 Visible = false
             };
 
-            tabButtons.Clear();
-            int tabX = 6;
-            for (int i = 0; i < tabNames.Length; i++)
+            btnMainClipboard = new Button
             {
-                int tabIdx = i;
-                Button tabBtn = new Button
-                {
-                    Text = tabNames[i],
-                    Location = new Point(tabX, 2),
-                    Size = new Size(i == 4 ? 76 : (i == 0 ? 38 : 54), 24),
-                    FlatStyle = FlatStyle.Flat,
-                    BackColor = Color.Transparent,
-                    ForeColor = (i == currentTabIndex) ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary,
-                    Font = new Font("Segoe UI", 8f, (i == currentTabIndex) ? FontStyle.Bold : FontStyle.Regular),
-                    Cursor = Cursors.Hand,
-                    TabStop = false
-                };
-                tabBtn.FlatAppearance.BorderSize = 0;
-                tabBtn.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
-                tabBtn.FlatAppearance.MouseDownBackColor = ThemeHelper.CardBackground;
-                tabBtn.Click += (s, e) => SwitchTab(tabIdx);
+                Text = "Буфер",
+                Location = new Point(8, 2),
+                Size = new Size(86, 24),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.Transparent,
+                ForeColor = (currentMainTab == 0) ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary,
+                Font = new Font("Segoe UI", 8f, (currentMainTab == 0) ? FontStyle.Bold : FontStyle.Regular),
+                Cursor = Cursors.Hand,
+                TabStop = false
+            };
+            btnMainClipboard.FlatAppearance.BorderSize = 0;
+            btnMainClipboard.Click += (s, e) => SwitchMainTab(0);
+            pnlTabs.Controls.Add(btnMainClipboard);
 
-                tabButtons.Add(tabBtn);
-                pnlTabs.Controls.Add(tabBtn);
-                tabX += tabBtn.Width + 2;
-            }
+            btnMainSuperHub = new Button
+            {
+                Text = "SuperHub",
+                Location = new Point(98, 2),
+                Size = new Size(116, 24),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.Transparent,
+                ForeColor = (currentMainTab == 1) ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary,
+                Font = new Font("Segoe UI", 8f, (currentMainTab == 1) ? FontStyle.Bold : FontStyle.Regular),
+                Cursor = Cursors.Hand,
+                TabStop = false
+            };
+            btnMainSuperHub.FlatAppearance.BorderSize = 0;
+            btnMainSuperHub.Click += (s, e) => SwitchMainTab(1);
+            pnlTabs.Controls.Add(btnMainSuperHub);
 
             pnlTabs.Paint += (s, e) => {
-                if (currentTabIndex >= 0 && currentTabIndex < tabButtons.Count)
+                Button actBtn = (currentMainTab == 0) ? btnMainClipboard : btnMainSuperHub;
+                if (actBtn != null)
                 {
-                    Button actBtn = tabButtons[currentTabIndex];
-                    int barW = Math.Min(24, actBtn.Width - 8);
+                    int barW = Math.Min(36, actBtn.Width - 8);
                     int barX = actBtn.Left + (actBtn.Width - barW) / 2;
                     using (var brush = new SolidBrush(ThemeHelper.Accent))
                     {
@@ -546,6 +565,40 @@ namespace PasteImageAsFile
                 }
             };
             this.Controls.Add(pnlTabs);
+
+            // Нижний уровень подвкладок буфера: [Все] [Снимки] [Текст] [Файлы] - 26px
+            pnlSubTabs = new Panel
+            {
+                Location = new Point(0, 66),
+                Size = new Size(ExpandedWidthVertical, 26),
+                BackColor = Color.FromArgb(28, 28, 28),
+                Visible = false
+            };
+
+            filterButtons.Clear();
+            int subX = 8;
+            for (int i = 0; i < filterNames.Length; i++)
+            {
+                int fIdx = i;
+                Button fBtn = new Button
+                {
+                    Text = filterNames[i],
+                    Location = new Point(subX, 2),
+                    Size = new Size(i == 0 ? 36 : 52, 22),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = (i == currentFilterIndex) ? ThemeHelper.AccentBackground : Color.Transparent,
+                    ForeColor = (i == currentFilterIndex) ? ThemeHelper.Accent : ThemeHelper.TextSecondary,
+                    Font = new Font("Segoe UI", 7.5f, (i == currentFilterIndex) ? FontStyle.Bold : FontStyle.Regular),
+                    Cursor = Cursors.Hand,
+                    TabStop = false
+                };
+                fBtn.FlatAppearance.BorderSize = 0;
+                fBtn.Click += (s, e) => SwitchFilter(fIdx);
+                filterButtons.Add(fBtn);
+                pnlSubTabs.Controls.Add(fBtn);
+                subX += fBtn.Width + 4;
+            }
+            this.Controls.Add(pnlSubTabs);
 
             // 3. Зона подсказки сброса файлов (Drop Hint) - 32px
             dropHint = new Panel
@@ -638,18 +691,59 @@ namespace PasteImageAsFile
             this.ResumeLayout(false);
         }
 
-        public void SwitchTab(int index)
+        public void SwitchMainTab(int mainTab)
         {
-            currentTabIndex = index;
-            for (int i = 0; i < tabButtons.Count; i++)
-            {
-                bool active = (i == currentTabIndex);
-                tabButtons[i].Font = new Font("Segoe UI", 8f, active ? FontStyle.Bold : FontStyle.Regular);
-                tabButtons[i].ForeColor = active ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary;
-            }
-            pnlTabs.Invalidate();
+            currentMainTab = mainTab;
+            UpdateTabsVisual();
             LayoutShelfContent();
             RefreshItems();
+        }
+
+        public void SwitchFilter(int filterIndex)
+        {
+            currentFilterIndex = filterIndex;
+            UpdateTabsVisual();
+            RefreshItems();
+        }
+
+        public void SwitchTab(int index)
+        {
+            if (index == 4) SwitchMainTab(1);
+            else
+            {
+                SwitchMainTab(0);
+                SwitchFilter(index);
+            }
+        }
+
+        private void UpdateTabsVisual()
+        {
+            if (btnMainClipboard != null)
+            {
+                bool active = (currentMainTab == 0);
+                btnMainClipboard.Font = new Font("Segoe UI", 8f, active ? FontStyle.Bold : FontStyle.Regular);
+                btnMainClipboard.ForeColor = active ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary;
+            }
+
+            if (btnMainSuperHub != null)
+            {
+                bool active = (currentMainTab == 1);
+                var superList = ClipboardHistoryManager.Instance.GetItems(null, true);
+                string title = superList.Count > 0 ? ("SuperHub [" + superList.Count + "]") : "SuperHub";
+                btnMainSuperHub.Text = title;
+                btnMainSuperHub.Font = new Font("Segoe UI", 8f, active ? FontStyle.Bold : FontStyle.Regular);
+                btnMainSuperHub.ForeColor = active ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary;
+            }
+
+            if (pnlTabs != null) pnlTabs.Invalidate();
+
+            for (int i = 0; i < filterButtons.Count; i++)
+            {
+                bool active = (i == currentFilterIndex);
+                filterButtons[i].BackColor = active ? ThemeHelper.AccentBackground : Color.Transparent;
+                filterButtons[i].ForeColor = active ? ThemeHelper.Accent : ThemeHelper.TextSecondary;
+                filterButtons[i].Font = new Font("Segoe UI", 7.5f, active ? FontStyle.Bold : FontStyle.Regular);
+            }
         }
 
         private void LayoutHeaderControls()
@@ -721,7 +815,19 @@ namespace PasteImageAsFile
                 }
             }
 
-            bool isHubTab = (!showTabs || currentTabIndex == 4);
+            bool isHubTab = (!showTabs || currentMainTab == 1);
+
+            if (pnlSubTabs != null)
+            {
+                pnlSubTabs.Visible = showTabs && isExpanded && !isHubTab;
+                if (pnlSubTabs.Visible)
+                {
+                    pnlSubTabs.Location = new Point(0, topY);
+                    pnlSubTabs.Width = w;
+                    pnlSubTabs.BringToFront();
+                    topY += pnlSubTabs.Height;
+                }
+            }
 
             if (dropHint != null)
             {
@@ -748,14 +854,14 @@ namespace PasteImageAsFile
             bool isCopy = string.Equals(Config.SuperHubDragMode, "Copy", StringComparison.OrdinalIgnoreCase);
             if (isCopy)
             {
-                btnDragMode.Text = "📋 Копия";
+                btnDragMode.Text = "Копия";
                 btnDragMode.BackColor = ThemeHelper.AccentBackground;
                 btnDragMode.ForeColor = ThemeHelper.Accent;
                 toolTip.SetToolTip(btnDragMode, "Режим: КОПИРОВАНИЕ файлов.\nПри перетаскивании наружу исходные файлы остаются на месте.\nКликните для переключения в режим Переноса.");
             }
             else
             {
-                btnDragMode.Text = "✂️ Перенос";
+                btnDragMode.Text = "Перенос";
                 btnDragMode.BackColor = Color.FromArgb(80, 50, 20);
                 btnDragMode.ForeColor = Color.FromArgb(255, 170, 60);
                 toolTip.SetToolTip(btnDragMode, "Режим: ПЕРЕМЕЩЕНИЕ файлов.\nПри перетаскивании наружу файлы вырезаются и переносятся.\nКликните для переключения в режим Копирования.");
@@ -842,6 +948,7 @@ namespace PasteImageAsFile
             this.isExpanded = false;
             pnlHeader.Visible = false;
             if (pnlTabs != null) pnlTabs.Visible = false;
+            if (pnlSubTabs != null) pnlSubTabs.Visible = false;
             dropHint.Visible = false;
             pnlContent.Visible = false;
 
@@ -888,6 +995,7 @@ namespace PasteImageAsFile
                     this.isExpanded = false;
                     pnlHeader.Visible = false;
                     if (pnlTabs != null) pnlTabs.Visible = false;
+                    if (pnlSubTabs != null) pnlSubTabs.Visible = false;
                     dropHint.Visible = false;
                     pnlContent.Visible = false;
                     ApplyWindowStyles();
@@ -1090,7 +1198,15 @@ namespace PasteImageAsFile
                     }
                 }
 
-                RefreshItems();
+                bool showTabs = string.Equals(Config.SuperHubViewMode, "Tabs", StringComparison.OrdinalIgnoreCase);
+                if (showTabs && currentMainTab != 1)
+                {
+                    SwitchMainTab(1);
+                }
+                else
+                {
+                    RefreshItems();
+                }
             }
             catch (Exception ex)
             {
@@ -1103,13 +1219,13 @@ namespace PasteImageAsFile
             if (!isExpanded) return;
 
             bool showTabs = string.Equals(Config.SuperHubViewMode, "Tabs", StringComparison.OrdinalIgnoreCase);
-            bool isHubTab = (!showTabs || currentTabIndex == 4);
+            bool isHubTab = (!showTabs || currentMainTab == 1);
 
             List<ClipboardItem> items;
             if (isHubTab)
             {
                 items = ClipboardHistoryManager.Instance.GetItems(null, true);
-                lblTitle.Text = string.Format("📦 SuperHub [{0}]", items.Count);
+                lblTitle.Text = string.Format("SuperHub [{0}]", items.Count);
                 btnDragAll.Visible = true;
                 btnDragMode.Visible = true;
                 btnClear.Visible = true;
@@ -1118,18 +1234,19 @@ namespace PasteImageAsFile
             else
             {
                 ClipboardItemType? filter = null;
-                if (currentTabIndex == 1) filter = ClipboardItemType.Image;
-                else if (currentTabIndex == 2) filter = ClipboardItemType.Text;
-                else if (currentTabIndex == 3) filter = ClipboardItemType.Files;
+                if (currentFilterIndex == 1) filter = ClipboardItemType.Image;
+                else if (currentFilterIndex == 2) filter = ClipboardItemType.Text;
+                else if (currentFilterIndex == 3) filter = ClipboardItemType.Files;
 
                 items = ClipboardHistoryManager.Instance.GetItems(filter, false);
-                string cat = tabNames[currentTabIndex];
-                lblTitle.Text = string.Format("📋 {0} [{1}]", cat, items.Count);
+                string cat = filterNames[currentFilterIndex];
+                lblTitle.Text = string.Format("{0} [{1}]", cat, items.Count);
                 btnDragAll.Visible = false;
                 btnDragMode.Visible = false;
                 btnClear.Visible = true;
                 toolTip.SetToolTip(btnClear, "Очистить журнал буфера обмена");
             }
+            UpdateTabsVisual();
 
             LayoutHeaderControls();
 
@@ -1290,11 +1407,11 @@ namespace PasteImageAsFile
             if (!string.IsNullOrEmpty(targetPath) && (SafeFileExists(targetPath) || SafeDirectoryExists(targetPath)))
             {
                 cardMenu.MenuItems.Add(new MenuItem("▷ Открыть в системе", (s, e) => LaunchFile(targetPath)));
-                cardMenu.MenuItems.Add(new MenuItem("📁 Показать в Проводнике", (s, e) => ShowInExplorer(targetPath)));
+                cardMenu.MenuItems.Add(new MenuItem("Показать в Проводнике", (s, e) => ShowInExplorer(targetPath)));
                 cardMenu.MenuItems.Add(new MenuItem("-"));
             }
-            cardMenu.MenuItems.Add(new MenuItem("📋 Скопировать в буфер", (s, e) => CopyItem(item)));
-            cardMenu.MenuItems.Add(new MenuItem("🗑 Удалить с полки", (s, e) => {
+            cardMenu.MenuItems.Add(new MenuItem("Скопировать в буфер", (s, e) => CopyItem(item)));
+            cardMenu.MenuItems.Add(new MenuItem("Удалить с полки", (s, e) => {
                 ClipboardHistoryManager.Instance.ToggleSuperHub(item.Id);
                 RefreshItems();
             }));
@@ -1437,12 +1554,12 @@ namespace PasteImageAsFile
             cardMenu.MenuItems.Add(new MenuItem("👁 Просмотр / Детали", (s, e) => ItemViewerForm.ShowViewer(item, targetPath)));
             if (!string.IsNullOrEmpty(targetPath) && (SafeFileExists(targetPath) || SafeDirectoryExists(targetPath)))
             {
-                cardMenu.MenuItems.Add(new MenuItem("▷ Открыть в системе", (s, e) => LaunchFile(targetPath)));
-                cardMenu.MenuItems.Add(new MenuItem("📁 Показать в Проводнике", (s, e) => ShowInExplorer(targetPath)));
+                cardMenu.MenuItems.Add(new MenuItem("Открыть в системе", (s, e) => LaunchFile(targetPath)));
+                cardMenu.MenuItems.Add(new MenuItem("Показать в Проводнике", (s, e) => ShowInExplorer(targetPath)));
                 cardMenu.MenuItems.Add(new MenuItem("-"));
             }
-            cardMenu.MenuItems.Add(new MenuItem("📋 Скопировать в буфер", (s, e) => CopyItem(item)));
-            cardMenu.MenuItems.Add(new MenuItem("🗑 Удалить с полки", (s, e) => {
+            cardMenu.MenuItems.Add(new MenuItem("Скопировать в буфер", (s, e) => CopyItem(item)));
+            cardMenu.MenuItems.Add(new MenuItem("Удалить с полки", (s, e) => {
                 ClipboardHistoryManager.Instance.ToggleSuperHub(item.Id);
                 RefreshItems();
             }));
@@ -1584,19 +1701,19 @@ namespace PasteImageAsFile
 
             // Контекстное меню
             ContextMenu cardMenu = new ContextMenu();
-            cardMenu.MenuItems.Add(new MenuItem("👁 Просмотр / Детали", (s, e) => ItemViewerForm.ShowViewer(item, targetPath)));
-            cardMenu.MenuItems.Add(new MenuItem("📥 Вставить в каретку (Ctrl+V)", (s, e) => PasteItem(item)));
-            cardMenu.MenuItems.Add(new MenuItem("📋 Скопировать в буфер", (s, e) => CopyItem(item)));
-            cardMenu.MenuItems.Add(new MenuItem("📌 " + (item.IsPinned ? "Открепить" : "Закрепить"), (s, e) => {
+            cardMenu.MenuItems.Add(new MenuItem("Просмотр / Детали", (s, e) => ItemViewerForm.ShowViewer(item, targetPath)));
+            cardMenu.MenuItems.Add(new MenuItem("Вставить в каретку (Ctrl+V)", (s, e) => PasteItem(item)));
+            cardMenu.MenuItems.Add(new MenuItem("Скопировать в буфер", (s, e) => CopyItem(item)));
+            cardMenu.MenuItems.Add(new MenuItem(item.IsPinned ? "Открепить" : "Закрепить вверху", (s, e) => {
                 ClipboardHistoryManager.Instance.TogglePin(item.Id);
                 RefreshItems();
             }));
-            cardMenu.MenuItems.Add(new MenuItem("📦 Добавить в SuperHub", (s, e) => {
+            cardMenu.MenuItems.Add(new MenuItem(item.IsInSuperHub ? "Убрать из SuperHub" : "Добавить в SuperHub", (s, e) => {
                 ClipboardHistoryManager.Instance.ToggleSuperHub(item.Id);
                 RefreshItems();
             }));
             cardMenu.MenuItems.Add(new MenuItem("-"));
-            cardMenu.MenuItems.Add(new MenuItem("🗑 Удалить из истории", (s, e) => {
+            cardMenu.MenuItems.Add(new MenuItem("Удалить из истории", (s, e) => {
                 ClipboardHistoryManager.Instance.DeleteItem(item.Id);
                 RefreshItems();
             }));

@@ -15,7 +15,6 @@ namespace PasteImageAsFile
 
         public FluentComboBox()
         {
-            this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             this.DrawMode = DrawMode.OwnerDrawFixed;
             this.DropDownStyle = ComboBoxStyle.DropDownList;
             this.FlatStyle = FlatStyle.Flat;
@@ -357,8 +356,8 @@ namespace PasteImageAsFile
                     TabStop = false
                 };
                 btnTab.FlatAppearance.BorderSize = 0;
-                btnTab.FlatAppearance.MouseOverBackColor = Color.FromArgb(45, 45, 45);
-                btnTab.FlatAppearance.MouseDownBackColor = Color.FromArgb(55, 55, 55);
+                btnTab.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+                btnTab.FlatAppearance.MouseDownBackColor = ThemeHelper.CardBackground;
                 btnTab.MouseEnter += (s, e) => {
                     btnTab.ForeColor = ThemeHelper.TextPrimary;
                 };
