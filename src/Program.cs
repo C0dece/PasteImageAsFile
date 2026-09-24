@@ -429,6 +429,17 @@ namespace PasteImageAsFile
             InitTray();
             StartWatcher();
 
+            try
+            {
+                var dock = SuperHubDockForm.Instance;
+                dock.Show();
+                Logger.Log("SuperHubDockForm initialized and shown");
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("Error showing SuperHubDockForm: " + ex.Message);
+            }
+
             Logger.Log("Entering Application.Run() for daemon");
             Application.Run();
             Logger.Log("Exited Application.Run() for daemon");
@@ -494,6 +505,7 @@ namespace PasteImageAsFile
 
             ContextMenu menu = new ContextMenu(new MenuItem[] {
                 new MenuItem("Буфер обмена", (s, e) => ShowClipboardHistory(true)),
+                new MenuItem("Полка SuperHub", (s, e) => SuperHubDockForm.Instance.ExpandShelf()),
                 new MenuItem("Системный буфер (Win+V)", (s, e) => SendNativeWinV(true)),
                 new MenuItem("-"),
                 new MenuItem("Сохранить картинку на Рабочий стол", (s, e) => SaveDirect(Environment.GetFolderPath(Environment.SpecialFolder.Desktop))),
