@@ -10,11 +10,12 @@ namespace PasteImageAsFile
 {
     public class FluentComboBox : ComboBox
     {
+        private const int WM_PAINT = 0x000F;
         private bool isHovered = false;
 
         public FluentComboBox()
         {
-            this.SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             this.DrawMode = DrawMode.OwnerDrawFixed;
             this.DropDownStyle = ComboBoxStyle.DropDownList;
             this.FlatStyle = FlatStyle.Flat;
@@ -76,61 +77,44 @@ namespace PasteImageAsFile
             }
         }
 
-        protected override void OnPaint(PaintEventArgs e)
+        protected override void WndProc(ref Message m)
         {
-            Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            base.WndProc(ref m);
 
-            bool isDark = ThemeHelper.IsDarkTheme();
-            Color bg = isDark
-                ? (isHovered ? Color.FromArgb(50, 50, 50) : Color.FromArgb(38, 38, 38))
-                : (isHovered ? Color.FromArgb(240, 240, 240) : Color.FromArgb(255, 255, 255));
-
-            Color borderColor = isDark
-                ? (isHovered ? Color.FromArgb(90, 90, 90) : Color.FromArgb(60, 60, 60))
-                : (isHovered ? Color.FromArgb(160, 160, 160) : Color.FromArgb(210, 210, 210));
-
-            Color textColor = isDark ? Color.FromArgb(240, 240, 240) : Color.FromArgb(25, 25, 25);
-            Color arrowColor = isDark ? Color.FromArgb(210, 210, 210) : Color.FromArgb(90, 90, 90);
-
-            // 1. Фон контрола
-            using (var b = new SolidBrush(bg))
+            if (m.Msg == WM_PAINT)
             {
-                g.FillRectangle(b, 0, 0, this.Width, this.Height);
-            }
+                try
+                {
+                    using (Graphics g = Graphics.FromHwnd(this.Handle))
+                    {
+                        g.SmoothingMode = SmoothingMode.AntiAlias;
+                        bool isDark = ThemeHelper.IsDarkTheme();
 
-            // 2. Текст выбранного пункта
-            string text = (this.SelectedItem != null) ? this.SelectedItem.ToString() : this.Text;
-            if (!string.IsNullOrEmpty(text))
-            {
-                Rectangle textRect = new Rectangle(10, 0, this.Width - 34, this.Height);
-                using (var brush = new SolidBrush(textColor))
-                using (var sf = new StringFormat
-                {
-                    LineAlignment = StringAlignment.Center,
-                    Alignment = StringAlignment.Near,
-                    Trimming = StringTrimming.EllipsisCharacter,
-                    FormatFlags = StringFormatFlags.NoWrap
-                })
-                {
-                    g.DrawString(text, this.Font, brush, textRect, sf);
+                        Color borderColor = isDark
+                            ? (isHovered ? Color.FromArgb(90, 90, 90) : Color.FromArgb(60, 60, 60))
+                            : (isHovered ? Color.FromArgb(160, 160, 160) : Color.FromArgb(210, 210, 210));
+
+                        Color arrowColor = isDark ? Color.FromArgb(210, 210, 210) : Color.FromArgb(90, 90, 90);
+
+                        // 1. Аккуратный шеврон ∨ справа
+                        int cx = this.Width - 15;
+                        int cy = this.Height / 2;
+                        using (var p = new Pen(arrowColor, 1.5f))
+                        {
+                            g.DrawLine(p, cx - 4, cy - 2, cx, cy + 2);
+                            g.DrawLine(p, cx, cy + 2, cx + 4, cy - 2);
+                        }
+
+                        // 2. Тонкая аккуратная рамка 1px
+                        using (var p = new Pen(borderColor, 1))
+                        {
+                            g.DrawRectangle(p, 0, 0, this.Width - 1, this.Height - 1);
+                        }
+                    }
                 }
-            }
-
-            // 3. Аккуратный шеврон ∨ справа
-            int cx = this.Width - 16;
-            int cy = this.Height / 2;
-            using (var p = new Pen(arrowColor, 1.5f))
-            {
-                g.DrawLine(p, cx - 4, cy - 2, cx, cy + 2);
-                g.DrawLine(p, cx, cy + 2, cx + 4, cy - 2);
-            }
-
-            // 4. Тонкая рамка 1px
-            using (var p = new Pen(borderColor, 1))
-            {
-                g.DrawRectangle(p, 0, 0, this.Width - 1, this.Height - 1);
+                catch
+                {
+                }
             }
         }
     }
@@ -795,38 +779,11 @@ namespace PasteImageAsFile
 
         private FluentComboBox CreateStyledComboBox(int x, int y, int w)
         {
-            var cmb = new FluentComboBox
+            return new FluentComboBox
             {
                 Location = new Point(x, y),
                 Size = new Size(w, 26)
             };
-
-            cmb.DrawItem += (s, e) => {
-                if (e.Index < 0) return;
-                bool isDark = ThemeHelper.IsDarkTheme();
-                bool isSelected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
-
-                Color bg = isSelected
-                    ? (isDark ? Color.FromArgb(0, 103, 192) : Color.FromArgb(204, 232, 255))
-                    : (isDark ? Color.FromArgb(43, 43, 43) : Color.FromArgb(255, 255, 255));
-                Color fg = isSelected
-                    ? Color.White
-                    : (isDark ? Color.FromArgb(240, 240, 240) : Color.FromArgb(25, 25, 25));
-
-                using (var brush = new SolidBrush(bg))
-                {
-                    e.Graphics.FillRectangle(brush, e.Bounds);
-                }
-
-                string text = cmb.Items[e.Index].ToString();
-                using (var font = new Font("Segoe UI", 9f))
-                using (var textBrush = new SolidBrush(fg))
-                {
-                    e.Graphics.DrawString(text, font, textBrush, e.Bounds.X + 8, e.Bounds.Y + 3);
-                }
-            };
-
-            return cmb;
         }
 
         private TextBox CreateStyledTextBox(int x, int y, int w)

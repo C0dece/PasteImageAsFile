@@ -153,7 +153,7 @@ namespace PasteImageAsFile
         private Button btnPinWindow;
         private Button btnClose;
         private Button btnClearAll;
-        private Button btnClickMode;
+        private Button btnDragMode;
 
         private ToolTip toolTip;
         private bool isWindowPinned = false;
@@ -216,6 +216,8 @@ namespace PasteImageAsFile
             // Drag and drop для всего окна
             this.DragEnter += OnFormDragEnter;
             this.DragDrop += OnFormDragDrop;
+
+            RefreshItems();
         }
 
         private void ApplyWindowStyles()
@@ -261,7 +263,7 @@ namespace PasteImageAsFile
 
             if (pnlViewport != null) pnlViewport.BackColor = ThemeHelper.Background;
 
-            UpdateClickModeButtonVisual();
+            UpdateDragModeButtonVisual();
 
             for (int i = 0; i < tabButtons.Count; i++)
             {
@@ -354,8 +356,8 @@ namespace PasteImageAsFile
             if (pnlActionHeader != null)
             {
                 pnlActionHeader.Width = w;
-                if (btnClearAll != null) btnClearAll.Location = new Point(w - 114, 6);
-                if (btnClickMode != null) btnClickMode.Location = new Point(w - 216, 6);
+                if (btnClearAll != null) btnClearAll.Location = new Point(w - 106, 6);
+                if (btnDragMode != null) btnDragMode.Location = new Point(w - 222, 6);
             }
 
             if (pnlSearch != null)
@@ -381,10 +383,18 @@ namespace PasteImageAsFile
                         c.Width = cardW;
                         foreach (Control sub in c.Controls)
                         {
-                            if (sub is Button && sub.Text == "···") sub.Left = cardW - 30;
-                            else if (sub is Button && sub.Text == "📌") sub.Left = cardW - 30;
-                            else if (sub is Button && sub.Text == "👁") sub.Left = cardW - 58;
-                            else if (sub is Label && sub.Left > 60) sub.Width = Math.Max(40, cardW - sub.Left - 64);
+                            if (sub is Button)
+                            {
+                                if (sub.Text == "···") sub.Left = cardW - 30;
+                                else if (sub.Text == "👁") sub.Left = cardW - 58;
+                                else if (sub.Text == "▷") sub.Left = cardW - 86;
+                                else if (sub.Text == "📌") sub.Left = cardW - 30;
+                                else if (sub.Text == "📥") sub.Left = cardW - 58;
+                            }
+                            else if (sub is Label && sub.Left > 40)
+                            {
+                                sub.Width = Math.Max(40, cardW - sub.Left - 92);
+                            }
                         }
                     }
                 }
@@ -564,30 +574,34 @@ namespace PasteImageAsFile
             };
             pnlActionHeader.Controls.Add(lblSection);
 
-            // Кнопка режима клика: [⚡ Вставлять] / [📋 Копировать]
-            btnClickMode = new Button
+            // Тумблер режима перетаскивания: Режим: Копия / Режим: Перенос
+            btnDragMode = new Button
             {
-                Location = new Point(this.Width - 216, 6),
-                Size = new Size(96, 26),
+                Location = new Point(this.Width - 222, 6),
+                Size = new Size(108, 26),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
-            btnClickMode.FlatAppearance.BorderSize = 0;
-            btnClickMode.Click += (s, e) => {
-                bool isPaste = string.Equals(Config.ClipboardClickAction, "Paste", StringComparison.OrdinalIgnoreCase);
-                Config.ClipboardClickAction = isPaste ? "Copy" : "Paste";
-                UpdateClickModeButtonVisual();
+            btnDragMode.FlatAppearance.BorderSize = 0;
+            btnDragMode.Click += (s, e) => {
+                bool isCopy = string.Equals(Config.SuperHubDragMode, "Copy", StringComparison.OrdinalIgnoreCase);
+                Config.SuperHubDragMode = isCopy ? "Move" : "Copy";
+                UpdateDragModeButtonVisual();
+                if (SuperHubDockForm.Instance != null && !SuperHubDockForm.Instance.IsDisposed)
+                {
+                    SuperHubDockForm.Instance.RefreshItems();
+                }
             };
-            UpdateClickModeButtonVisual();
-            pnlActionHeader.Controls.Add(btnClickMode);
+            UpdateDragModeButtonVisual();
+            pnlActionHeader.Controls.Add(btnDragMode);
 
             // Кнопка очистки
             btnClearAll = new Button
             {
                 Text = "Очистить все",
-                Location = new Point(this.Width - 114, 6),
-                Size = new Size(100, 26),
+                Location = new Point(this.Width - 106, 6),
+                Size = new Size(96, 26),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(44, 44, 44),
                 ForeColor = Color.FromArgb(220, 220, 220),
@@ -717,23 +731,23 @@ namespace PasteImageAsFile
             this.ResumeLayout(false);
         }
 
-        private void UpdateClickModeButtonVisual()
+        private void UpdateDragModeButtonVisual()
         {
-            if (btnClickMode == null) return;
-            bool isPaste = string.Equals(Config.ClipboardClickAction, "Paste", StringComparison.OrdinalIgnoreCase);
-            if (isPaste)
+            if (btnDragMode == null) return;
+            bool isCopy = string.Equals(Config.SuperHubDragMode, "Copy", StringComparison.OrdinalIgnoreCase);
+            if (isCopy)
             {
-                btnClickMode.Text = "⚡ Вставлять";
-                btnClickMode.BackColor = ThemeHelper.AccentBackground;
-                btnClickMode.ForeColor = ThemeHelper.Accent;
-                toolTip.SetToolTip(btnClickMode, "Режим по клику: ВСТАВИТЬ (Ctrl+V).\nПри клике на карточку фокус вернется в активное окно и выполнится вставка.\nКликните для переключения в режим Копирования.");
+                btnDragMode.Text = "Режим: Копия";
+                btnDragMode.BackColor = ThemeHelper.AccentBackground;
+                btnDragMode.ForeColor = ThemeHelper.Accent;
+                toolTip.SetToolTip(btnDragMode, "Режим Drag-and-Drop: КОПИРОВАНИЕ файлов.\nПри перетаскивании наружу исходные файлы остаются на месте.\nКликните для переключения в режим Переноса.");
             }
             else
             {
-                btnClickMode.Text = "📋 Копировать";
-                btnClickMode.BackColor = ThemeHelper.CardBackground;
-                btnClickMode.ForeColor = ThemeHelper.TextPrimary;
-                toolTip.SetToolTip(btnClickMode, "Режим по клику: КОПИРОВАТЬ в буфер.\nПри клике на карточку элемент просто скопируется в буфер обмена.\nКликните для переключения в режим быстрой Вставки.");
+                btnDragMode.Text = "Режим: Перенос";
+                btnDragMode.BackColor = Color.FromArgb(80, 50, 20);
+                btnDragMode.ForeColor = Color.FromArgb(255, 170, 60);
+                toolTip.SetToolTip(btnDragMode, "Режим Drag-and-Drop: ПЕРЕМЕЩЕНИЕ файлов.\nПри перетаскивании наружу файлы переносятся (вырезаются).\nКликните для переключения в режим Копирования.");
             }
         }
 
@@ -964,6 +978,28 @@ namespace PasteImageAsFile
                 }
             };
 
+            // Определение пути для открытия/запуска
+            string targetPathForLaunch = null;
+            if (item.Type == ClipboardItemType.Image && SafeFileExists(item.ImagePath))
+            {
+                targetPathForLaunch = item.ImagePath;
+            }
+            else if (item.Type == ClipboardItemType.Files && item.FilePaths != null && item.FilePaths.Count > 0)
+            {
+                targetPathForLaunch = item.FilePaths[0];
+            }
+            else if (item.Type == ClipboardItemType.Text && !string.IsNullOrEmpty(item.TextContent))
+            {
+                string trimmed = item.TextContent.Trim();
+                if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                    (trimmed.Length < 260 && (SafeFileExists(trimmed) || SafeDirectoryExists(trimmed))))
+                {
+                    targetPathForLaunch = trimmed;
+                }
+            }
+            bool hasLaunch = !string.IsNullOrEmpty(targetPathForLaunch);
+
             // Правые кнопки управления:
             // 1. Вверху справа: кнопка действий [···]
             Button btnMenu = new Button
@@ -988,7 +1024,7 @@ namespace PasteImageAsFile
             toolTip.SetToolTip(btnMenu, "Меню действий");
             card.Controls.Add(btnMenu);
 
-            // 2. Вверху рядом с меню: кнопка быстрого предпросмотра [👁]
+            // 2. Вверху: кнопка быстрого предпросмотра [👁]
             Button btnView = new Button
             {
                 Text = "👁",
@@ -1007,10 +1043,35 @@ namespace PasteImageAsFile
             btnView.Click += (s, e) => {
                 ItemViewerForm.ShowViewer(item);
             };
-            toolTip.SetToolTip(btnView, "Просмотр (зум картинки, текст, документ)");
+            toolTip.SetToolTip(btnView, "Просмотр содержимого (зум картинки, текст, документ)");
             card.Controls.Add(btnView);
 
-            // 3. Внизу справа: кнопка закрепления [📌]
+            // 3. Вверху: кнопка запуска / открытия файла [▷] (если это файл/ссылка)
+            Button btnLaunch = null;
+            if (hasLaunch)
+            {
+                btnLaunch = new Button
+                {
+                    Text = "▷",
+                    Location = new Point(card.Width - 86, 6),
+                    Size = new Size(24, 22),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.Transparent,
+                    ForeColor = ThemeHelper.TextSecondary,
+                    Font = new Font("Segoe UI", 9f),
+                    Cursor = Cursors.Hand,
+                    TabStop = false
+                };
+                btnLaunch.FlatAppearance.BorderSize = 0;
+                btnLaunch.MouseEnter += (s, e) => { btnLaunch.BackColor = ThemeHelper.ButtonHover; btnLaunch.ForeColor = ThemeHelper.TextPrimary; };
+                btnLaunch.MouseLeave += (s, e) => { btnLaunch.BackColor = Color.Transparent; btnLaunch.ForeColor = ThemeHelper.TextSecondary; };
+                string launchTarget = targetPathForLaunch;
+                btnLaunch.Click += (s, e) => OpenItemInAssociatedApp(launchTarget);
+                toolTip.SetToolTip(btnLaunch, "Открыть / Запустить файл в ассоциированной программе Windows");
+                card.Controls.Add(btnLaunch);
+            }
+
+            // 4. Внизу справа: кнопка закрепления [📌]
             Button btnPin = new Button
             {
                 Text = "📌",
@@ -1036,10 +1097,30 @@ namespace PasteImageAsFile
             toolTip.SetToolTip(btnPin, item.IsPinned ? "Открепить" : "Закрепить вверху");
             card.Controls.Add(btnPin);
 
+            // 5. Внизу: кнопка быстрой вставки в активное окно [📥]
+            Button btnPaste = new Button
+            {
+                Text = "📥",
+                Location = new Point(card.Width - 58, card.Height - 28),
+                Size = new Size(24, 22),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.Transparent,
+                ForeColor = ThemeHelper.TextSecondary,
+                Font = new Font("Segoe UI", 9f),
+                Cursor = Cursors.Hand,
+                TabStop = false
+            };
+            btnPaste.FlatAppearance.BorderSize = 0;
+            btnPaste.MouseEnter += (s, e) => { btnPaste.BackColor = ThemeHelper.ButtonHover; btnPaste.ForeColor = ThemeHelper.Accent; };
+            btnPaste.MouseLeave += (s, e) => { btnPaste.BackColor = Color.Transparent; btnPaste.ForeColor = ThemeHelper.TextSecondary; };
+            btnPaste.Click += (s, e) => PasteItem(item);
+            toolTip.SetToolTip(btnPaste, "Вставить в активное окно (эмуляция Ctrl+V в место каретки)");
+            card.Controls.Add(btnPaste);
+
             // Контентная часть карточки
+            int rightControlsWidth = hasLaunch ? 92 : 64;
             int textLeft = 14;
-            int textWidth = card.Width - 70;
-            string targetPathForLaunch = null;
+            int textWidth = card.Width - rightControlsWidth - 14;
 
             if (item.Type == ClipboardItemType.Image && SafeFileExists(item.ImagePath))
             {
@@ -1184,15 +1265,20 @@ namespace PasteImageAsFile
                 c.MouseEnter += (s, e) => { card.BackColor = ThemeHelper.CardHover; };
                 c.MouseLeave += (s, e) => { card.BackColor = ThemeHelper.CardBackground; };
 
-                // Одиночный клик: копирование или вставка по настройке
+                // Одиночный клик: строгое копирование в буфер
                 c.Click += (s, e) => {
-                    if (c == btnMenu || c == btnPin || c == btnView) return;
-                    HandleCardClick(item);
+                    if (c == btnMenu || c == btnPin || c == btnView || c == btnPaste || c == btnLaunch) return;
+                    CopyItem(item);
+                    ShowCopiedNotification();
+                    if (!isWindowPinned)
+                    {
+                        CloseFlyout();
+                    }
                 };
 
                 // Двойной клик открывает файл
                 c.DoubleClick += (s, e) => {
-                    if (c != btnMenu && c != btnPin && c != btnView && !string.IsNullOrEmpty(targetPathForLaunch))
+                    if (c != btnMenu && c != btnPin && c != btnView && c != btnPaste && c != btnLaunch && !string.IsNullOrEmpty(targetPathForLaunch))
                     {
                         OpenItemInAssociatedApp(targetPathForLaunch);
                     }
@@ -1200,7 +1286,7 @@ namespace PasteImageAsFile
 
                 // Запоминаем точку нажатия для детекции Drag vs Click
                 c.MouseDown += (s, e) => {
-                    if (e.Button == MouseButtons.Left && e.Clicks == 1 && c != btnMenu && c != btnPin && c != btnView)
+                    if (e.Button == MouseButtons.Left && e.Clicks == 1 && c != btnMenu && c != btnPin && c != btnView && c != btnPaste && c != btnLaunch)
                     {
                         dragStartPt = e.Location;
                         isPotentialDrag = true;
@@ -1208,7 +1294,7 @@ namespace PasteImageAsFile
                 };
 
                 c.MouseMove += (s, e) => {
-                    if (isPotentialDrag && e.Button == MouseButtons.Left && c != btnMenu && c != btnPin && c != btnView)
+                    if (isPotentialDrag && e.Button == MouseButtons.Left && c != btnMenu && c != btnPin && c != btnView && c != btnPaste && c != btnLaunch)
                     {
                         int dx = Math.Abs(e.X - dragStartPt.X);
                         int dy = Math.Abs(e.Y - dragStartPt.Y);
@@ -1222,11 +1308,17 @@ namespace PasteImageAsFile
 
                 c.MouseUp += (s, e) => {
                     isPotentialDrag = false;
+                    // Правый клик мыши открывает контекстное меню на любом месте карточки
+                    if (e.Button == MouseButtons.Right)
+                    {
+                        ContextMenu cm = CreateCardContextMenu(item);
+                        cm.Show(c, e.Location);
+                    }
                 };
 
                 foreach (Control sub in c.Controls)
                 {
-                    if (sub != btnMenu && sub != btnPin && sub != btnView)
+                    if (sub != btnMenu && sub != btnPin && sub != btnView && sub != btnPaste && sub != btnLaunch)
                     {
                         attachEvents(sub);
                     }
@@ -1234,10 +1326,7 @@ namespace PasteImageAsFile
             };
             attachEvents(card);
 
-            bool isPaste = string.Equals(Config.ClipboardClickAction, "Paste", StringComparison.OrdinalIgnoreCase);
-            string tip = isPaste
-                ? "Клик: вставить в активное окно (Ctrl+V)\nДвойной клик: открыть файл"
-                : "Клик: скопировать в буфер\nДвойной клик: открыть файл";
+            string tip = "Клик: скопировать в буфер\nДвойной клик: открыть файл\nПравый клик: контекстное меню действий";
             toolTip.SetToolTip(card, tip);
 
             return card;
@@ -1245,19 +1334,11 @@ namespace PasteImageAsFile
 
         private void HandleCardClick(ClipboardItem item)
         {
-            bool isPaste = string.Equals(Config.ClipboardClickAction, "Paste", StringComparison.OrdinalIgnoreCase);
-            if (isPaste)
+            CopyItem(item);
+            ShowCopiedNotification();
+            if (!isWindowPinned)
             {
-                PasteItem(item);
-            }
-            else
-            {
-                CopyItem(item);
-                ShowCopiedNotification();
-                if (!isWindowPinned)
-                {
-                    CloseFlyout();
-                }
+                CloseFlyout();
             }
         }
 
@@ -1392,17 +1473,26 @@ namespace PasteImageAsFile
             ThreadPool.QueueUserWorkItem(_ => {
                 try
                 {
-                    Thread.Sleep(wasPinned ? 40 : 80);
+                    // Пауза для надежного закрытия окна и переключения фокуса Windows
+                    Thread.Sleep(wasPinned ? 60 : 120);
                     if (targetWnd != IntPtr.Zero)
                     {
                         Program.ForceForegroundWindow(targetWnd);
-                        Thread.Sleep(50);
+                        Thread.Sleep(80);
                     }
 
+                    // Сброс модификаторов (Alt, Shift, Win), если они остались зажатыми
+                    keybd_event(0x12, 0, KEYEVENTF_KEYUP, UIntPtr.Zero); // Alt
+                    keybd_event(0x10, 0, KEYEVENTF_KEYUP, UIntPtr.Zero); // Shift
+                    keybd_event(0x5B, 0, KEYEVENTF_KEYUP, UIntPtr.Zero); // Win
+
+                    // Отправка комбинации Ctrl+V
                     keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
+                    Thread.Sleep(15);
                     keybd_event(VK_V, 0, 0, UIntPtr.Zero);
                     Thread.Sleep(30);
                     keybd_event(VK_V, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    Thread.Sleep(15);
                     keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
 
                     Logger.Log(string.Format("Pasted item {0} into targetWnd={1}", item.Id, targetWnd));
@@ -1419,8 +1509,9 @@ namespace PasteImageAsFile
             try
             {
                 DataObject data = new DataObject();
-                // По умолчанию из буфера обмена перетаскивание ВСЕГДА в режиме Copy
-                var dropEffectStream = new MemoryStream(new byte[] { 1, 0, 0, 0 }); // DROPEFFECT_COPY
+                // Учет выбранного режима: Копия или Перенос
+                bool isMove = string.Equals(Config.SuperHubDragMode, "Move", StringComparison.OrdinalIgnoreCase);
+                var dropEffectStream = new MemoryStream(new byte[] { (byte)(isMove ? 2 : 1), 0, 0, 0 });
                 data.SetData("Preferred DropEffect", dropEffectStream);
 
                 if (item.Type == ClipboardItemType.Files && item.FilePaths != null && item.FilePaths.Count > 0)
@@ -1439,7 +1530,7 @@ namespace PasteImageAsFile
                     data.SetText(item.TextContent ?? "");
                 }
 
-                sourceControl.DoDragDrop(data, DragDropEffects.Copy);
+                sourceControl.DoDragDrop(data, isMove ? DragDropEffects.Move : DragDropEffects.Copy);
             }
             catch (Exception ex)
             {

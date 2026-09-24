@@ -35,8 +35,8 @@ namespace PasteImageAsFile
         private const int ExpandedWidthHorizontal = 580;
         private const int ShelfHeightHorizontal = 210;
 
-        // Размеры видимого ярлычка в свернутом виде
-        private const int CollapsedBarThickness = 6;
+        // Размеры видимого ярлычка в свернутом виде (акцентный маркер без серой подложки)
+        private const int CollapsedBarThickness = 4;
         private const int CollapsedBarLength = 80;
 
         private static SuperHubDockForm instance;
@@ -47,6 +47,15 @@ namespace PasteImageAsFile
         private System.Windows.Forms.Timer pollTimer;
         private DateTime lastPointerInside = DateTime.MinValue;
         private int hoverExpandCounter = 0;
+
+        // Плавная анимация выезда и сворачивания (Slide-in / Slide-out)
+        private System.Windows.Forms.Timer animTimer;
+        private bool isAnimating = false;
+        private bool isExpandingTarget = false;
+        private int animCurrentStep = 0;
+        private const int AnimTotalSteps = 8;
+        private Rectangle animStartBounds;
+        private Rectangle animTargetBounds;
 
         private Panel pnlHeader;
         private Label lblTitle;
@@ -126,6 +135,11 @@ namespace PasteImageAsFile
             pollTimer.Tick += OnPollTick;
             pollTimer.Start();
 
+            // Таймер плавной анимации выдвижения/скрытия полки (Slide-in / Slide-out)
+            animTimer = new System.Windows.Forms.Timer();
+            animTimer.Interval = 15;
+            animTimer.Tick += OnAnimTick;
+
             // Настройка сплошного приема Drop на всё окно и дочерние контролы
             RegisterDropTarget(this);
         }
@@ -139,6 +153,20 @@ namespace PasteImageAsFile
                 cp.ExStyle |= 0x00000080; // WS_EX_TOOLWINDOW - не создаёт стандартную рамку DWM
                 return cp;
             }
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            if (!isExpanded)
+            {
+                // В свернутом состоянии заливаем фон исключительно чистым цветом акцента без серого подслоя
+                using (var b = new SolidBrush(ThemeHelper.Accent))
+                {
+                    e.Graphics.FillRectangle(b, 0, 0, this.Width, this.Height);
+                }
+                return;
+            }
+            base.OnPaintBackground(e);
         }
 
         private void ApplyWindowStyles()
@@ -393,24 +421,10 @@ namespace PasteImageAsFile
             this.Paint += (s, e) => {
                 if (!isExpanded)
                 {
-                    // В свернутом состоянии рисуем сплошной темный фон и акцентную линию цвета темы
-                    using (var bgBrush = new SolidBrush(ThemeHelper.HeaderBackground))
-                    {
-                        e.Graphics.FillRectangle(bgBrush, 0, 0, this.Width, this.Height);
-                    }
-
+                    // В свернутом состоянии рисуем сплошной акцентный маркер цвета темы без серого фона
                     using (var b = new SolidBrush(ThemeHelper.Accent))
                     {
-                        if (IsHorizontalPosition())
-                        {
-                            int barY = IsPositionTop() ? 0 : (this.Height - 3);
-                            e.Graphics.FillRectangle(b, 4, barY, this.Width - 8, 3);
-                        }
-                        else
-                        {
-                            int indX = IsPositionOnLeft() ? 0 : (this.Width - 3);
-                            e.Graphics.FillRectangle(b, indX, 4, 3, this.Height - 8);
-                        }
+                        e.Graphics.FillRectangle(b, 0, 0, this.Width, this.Height);
                     }
                 }
                 else
@@ -526,6 +540,23 @@ namespace PasteImageAsFile
             }
         }
 
+        private Rectangle GetCollapsedBounds()
+        {
+            Screen scr = Screen.PrimaryScreen;
+            if (IsHorizontalPosition())
+            {
+                int x = scr.WorkingArea.Left + (scr.WorkingArea.Width - CollapsedBarLength) / 2;
+                int y = IsPositionTop() ? scr.WorkingArea.Top : (scr.WorkingArea.Bottom - CollapsedBarThickness);
+                return new Rectangle(x, y, CollapsedBarLength, CollapsedBarThickness);
+            }
+            else
+            {
+                int y = CalculateShelfY(scr) + (ShelfHeightVertical - CollapsedBarLength) / 2;
+                int x = IsPositionOnLeft() ? scr.WorkingArea.Left : (scr.WorkingArea.Right - CollapsedBarThickness);
+                return new Rectangle(x, y, CollapsedBarThickness, CollapsedBarLength);
+            }
+        }
+
         public void PositionCollapsed()
         {
             if (!Config.SuperHubEnabled)
@@ -534,24 +565,21 @@ namespace PasteImageAsFile
                 return;
             }
 
-            Screen scr = Screen.PrimaryScreen;
+            if (animTimer != null) animTimer.Stop();
+            isAnimating = false;
             this.isExpanded = false;
             pnlHeader.Visible = false;
             dropHint.Visible = false;
             pnlContent.Visible = false;
 
+            Rectangle b = GetCollapsedBounds();
+            this.SetBounds(b.X, b.Y, b.Width, b.Height);
             if (IsHorizontalPosition())
             {
-                int x = scr.WorkingArea.Left + (scr.WorkingArea.Width - CollapsedBarLength) / 2;
-                int y = IsPositionTop() ? scr.WorkingArea.Top : (scr.WorkingArea.Bottom - CollapsedBarThickness);
-                this.SetBounds(x, y, CollapsedBarLength, CollapsedBarThickness);
                 btnCollapse.Text = IsPositionTop() ? "▲" : "▼";
             }
             else
             {
-                int y = CalculateShelfY(scr) + (ShelfHeightVertical - CollapsedBarLength) / 2;
-                int x = IsPositionOnLeft() ? scr.WorkingArea.Left : (scr.WorkingArea.Right - CollapsedBarThickness);
-                this.SetBounds(x, y, CollapsedBarThickness, CollapsedBarLength);
                 btnCollapse.Text = IsPositionOnLeft() ? "‹" : "›";
             }
 
@@ -560,24 +588,62 @@ namespace PasteImageAsFile
             this.Invalidate();
         }
 
-        public void ExpandShelf()
+        private void OnAnimTick(object sender, EventArgs e)
+        {
+            animCurrentStep++;
+            float t = (float)animCurrentStep / AnimTotalSteps;
+            if (t > 1.0f) t = 1.0f;
+
+            // Кубическая функция сглаживания Ease-Out (быстрый старт, плавное замедление)
+            float ease = (float)(1.0 - Math.Pow(1.0 - t, 3));
+
+            int curX = (int)(animStartBounds.X + (animTargetBounds.X - animStartBounds.X) * ease);
+            int curY = (int)(animStartBounds.Y + (animTargetBounds.Y - animStartBounds.Y) * ease);
+            int curW = (int)(animStartBounds.Width + (animTargetBounds.Width - animStartBounds.Width) * ease);
+            int curH = (int)(animStartBounds.Height + (animTargetBounds.Height - animStartBounds.Height) * ease);
+
+            this.SetBounds(curX, curY, Math.Max(1, curW), Math.Max(1, curH));
+
+            if (animCurrentStep >= AnimTotalSteps)
+            {
+                animTimer.Stop();
+                isAnimating = false;
+                this.SetBounds(animTargetBounds.X, animTargetBounds.Y, animTargetBounds.Width, animTargetBounds.Height);
+
+                if (!isExpandingTarget)
+                {
+                    this.isExpanded = false;
+                    pnlHeader.Visible = false;
+                    dropHint.Visible = false;
+                    pnlContent.Visible = false;
+                    ApplyWindowStyles();
+                    this.Invalidate();
+                }
+                else
+                {
+                    this.isExpanded = true;
+                    ApplyWindowStyles();
+                    this.BringToFront();
+                    this.Invalidate();
+                }
+            }
+        }
+
+        public void ExpandShelf(bool animate = true)
         {
             if (!Config.SuperHubEnabled) return;
-            if (isExpanded) return;
+            if (isExpanded && !isAnimating) return;
+            if (isAnimating && isExpandingTarget) return;
 
             Screen scr = Screen.PrimaryScreen;
-            this.isExpanded = true;
-
-            this.SuspendLayout();
-
+            Rectangle target;
             if (IsHorizontalPosition())
             {
                 int w = ExpandedWidthHorizontal;
                 int h = ShelfHeightHorizontal;
                 int x = scr.WorkingArea.Left + (scr.WorkingArea.Width - w) / 2;
                 int y = IsPositionTop() ? scr.WorkingArea.Top : (scr.WorkingArea.Bottom - h);
-
-                this.SetBounds(x, y, w, h);
+                target = new Rectangle(x, y, w, h);
                 btnCollapse.Text = IsPositionTop() ? "▲" : "▼";
 
                 pnlHeader.Size = new Size(w, 38);
@@ -592,8 +658,7 @@ namespace PasteImageAsFile
                 int h = ShelfHeightVertical;
                 int y = CalculateShelfY(scr);
                 int x = IsPositionOnLeft() ? scr.WorkingArea.Left : (scr.WorkingArea.Right - w);
-
-                this.SetBounds(x, y, w, h);
+                target = new Rectangle(x, y, w, h);
                 btnCollapse.Text = IsPositionOnLeft() ? "‹" : "›";
 
                 pnlHeader.Size = new Size(w, 38);
@@ -604,22 +669,51 @@ namespace PasteImageAsFile
             }
 
             LayoutHeaderControls();
+            RefreshItems();
+
             pnlHeader.Visible = true;
             dropHint.Visible = true;
             pnlContent.Visible = true;
 
-            RefreshItems();
-            this.ResumeLayout(true);
-
+            this.isExpanded = true;
             ApplyWindowStyles();
-            this.BringToFront();
-            this.Invalidate();
+
+            if (!animate)
+            {
+                this.SetBounds(target.X, target.Y, target.Width, target.Height);
+                this.BringToFront();
+                this.Invalidate();
+                return;
+            }
+
+            animStartBounds = this.Bounds;
+            animTargetBounds = target;
+            isExpandingTarget = true;
+            isAnimating = true;
+            animCurrentStep = 0;
+            animTimer.Start();
         }
 
-        public void CollapseShelf()
+        public void CollapseShelf(bool animate = true)
         {
-            if (!isExpanded || isPinned) return;
-            PositionCollapsed();
+            if (isPinned) return;
+            if (!isExpanded && !isAnimating) return;
+            if (isAnimating && !isExpandingTarget) return;
+
+            Rectangle collapsed = GetCollapsedBounds();
+
+            if (!animate)
+            {
+                PositionCollapsed();
+                return;
+            }
+
+            animStartBounds = this.Bounds;
+            animTargetBounds = collapsed;
+            isExpandingTarget = false;
+            isAnimating = true;
+            animCurrentStep = 0;
+            animTimer.Start();
         }
 
         private void OnPollTick(object sender, EventArgs e)

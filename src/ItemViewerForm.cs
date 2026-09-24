@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
+using System.Xml;
 
 namespace PasteImageAsFile
 {
@@ -151,6 +152,7 @@ namespace PasteImageAsFile
                 pnlImageContainer.Invalidate();
             }
 
+            UpdatePinVisual();
             this.Invalidate();
         }
 
@@ -188,12 +190,17 @@ namespace PasteImageAsFile
             pnlHeader.Controls.Add(lblSubtitle);
 
             // Кнопка [📌] Закрепить
-            btnPin = CreateHeaderButton("📌", this.Width - 130, 8, 32, 28, "Закрепить окно поверх остальных (чтобы постоянно видеть)");
+            btnPin = CreateHeaderButton("📌 Закрепить", this.Width - 200, 8, 100, 28, "Закрепить окно поверх остальных (чтобы постоянно видеть)");
+            btnPin.MouseEnter += (s, e) => {
+                if (!isPinned) btnPin.BackColor = ThemeHelper.ButtonHover;
+            };
+            btnPin.MouseLeave += (s, e) => {
+                if (!isPinned) { btnPin.BackColor = Color.Transparent; btnPin.ForeColor = ThemeHelper.TextSecondary; }
+                else { btnPin.BackColor = ThemeHelper.AccentBackground; btnPin.ForeColor = ThemeHelper.Accent; }
+            };
             btnPin.Click += (s, e) => {
                 isPinned = !isPinned;
-                this.TopMost = isPinned;
-                btnPin.ForeColor = isPinned ? ThemeHelper.Accent : ThemeHelper.TextSecondary;
-                toolTip.SetToolTip(btnPin, isPinned ? "Окно закреплено поверх всех (кликните для открепления)" : "Закрепить поверх всех");
+                UpdatePinVisual();
             };
             pnlHeader.Controls.Add(btnPin);
 
@@ -207,15 +214,10 @@ namespace PasteImageAsFile
             btnOpenExternal.Click += (s, e) => OpenExternal();
             pnlHeader.Controls.Add(btnOpenExternal);
 
-            pnlHeader.Resize += (s, e) => {
-                btnOpenExternal.Left = pnlHeader.Width - 44;
-                btnCopy.Left = pnlHeader.Width - 82;
-                btnPin.Left = pnlHeader.Width - 120;
-                lblTitle.Width = Math.Max(100, btnPin.Left - 20);
-                lblSubtitle.Width = lblTitle.Width;
-            };
-
+            pnlHeader.Resize += (s, e) => RelayoutHeaderButtons();
             this.Controls.Add(pnlHeader);
+
+            UpdatePinVisual();
 
             // 2. Определение режима отображения: картинка или текст/документ
             if (IsImageItem())
@@ -228,6 +230,45 @@ namespace PasteImageAsFile
             }
 
             this.ResumeLayout(false);
+        }
+
+        private void UpdatePinVisual()
+        {
+            if (btnPin == null) return;
+            this.TopMost = isPinned;
+            if (isPinned)
+            {
+                btnPin.Text = "📌 Закреплено";
+                btnPin.Width = 114;
+                btnPin.BackColor = ThemeHelper.AccentBackground;
+                btnPin.ForeColor = ThemeHelper.Accent;
+                btnPin.Font = new Font("Segoe UI Semibold", 8.5f, FontStyle.Bold);
+                toolTip.SetToolTip(btnPin, "Окно закреплено поверх всех (кликните для открепления)");
+                this.Text = "📌 [Закреплено] " + GetDisplayTitle() + " - PasteImageAsFile";
+                if (lblTitle != null) lblTitle.Text = "📌 " + GetDisplayTitle();
+            }
+            else
+            {
+                btnPin.Text = "📌 Закрепить";
+                btnPin.Width = 100;
+                btnPin.BackColor = Color.Transparent;
+                btnPin.ForeColor = ThemeHelper.TextSecondary;
+                btnPin.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+                toolTip.SetToolTip(btnPin, "Закрепить окно поверх остальных");
+                this.Text = GetDisplayTitle() + " - PasteImageAsFile";
+                if (lblTitle != null) lblTitle.Text = GetDisplayTitle();
+            }
+            RelayoutHeaderButtons();
+        }
+
+        private void RelayoutHeaderButtons()
+        {
+            if (pnlHeader == null || btnOpenExternal == null || btnCopy == null || btnPin == null) return;
+            btnOpenExternal.Left = pnlHeader.Width - 44;
+            btnCopy.Left = pnlHeader.Width - 82;
+            btnPin.Left = btnCopy.Left - btnPin.Width - 8;
+            if (lblTitle != null) lblTitle.Width = Math.Max(100, btnPin.Left - 20);
+            if (lblSubtitle != null) lblSubtitle.Width = Math.Max(100, btnPin.Left - 20);
         }
 
         private string GetDisplayTitle()
@@ -558,25 +599,192 @@ namespace PasteImageAsFile
                 return ExtractTextFromDoc(filePath);
             }
 
-            // 3. Стандартные текстовые файлы
+            // 3. Чтение файла с совместным доступом FileShare.ReadWrite (не блокирует и не падает на занятых файлах)
             try
             {
-                // Автоопределение кодировки UTF-8 / Windows-1251
-                byte[] bytes = File.ReadAllBytes(filePath);
-                if (bytes.Length == 0) return "[Файл пуст]";
+                byte[] bytes = ReadAllBytesShared(filePath);
+                if (bytes == null || bytes.Length == 0) return "[Файл пуст]";
 
-                // Проверка на UTF-8
-                string utf8Text = Encoding.UTF8.GetString(bytes);
-                if (!utf8Text.Contains("\uFFFD"))
+                // 4. Формат .XML (форматирование с отступами)
+                if (ext == ".xml")
                 {
-                    return utf8Text;
+                    string rawXml = DecodeTextFromBytes(bytes);
+                    return FormatXml(rawXml);
                 }
-                // Иначе Windows-1251
-                return Encoding.GetEncoding(1251).GetString(bytes);
+
+                // 5. Формат .JSON (форматирование структуры)
+                if (ext == ".json")
+                {
+                    string rawJson = DecodeTextFromBytes(bytes);
+                    return FormatJson(rawJson);
+                }
+
+                // 6. Проверка: если файл двоичный (содержит 0x00 байты в начале)
+                if (IsBinaryFile(bytes))
+                {
+                    return string.Format("[Двоичный файл: {0} ({1})]\r\n\r\nСодержимое этого файла имеет двоичный формат и не может быть отображено как текст.\r\nНажмите кнопку '↗' в правом верхнем углу, чтобы открыть файл в ассоциированной программе Windows.",
+                        Path.GetFileName(filePath), FormatFileSize(bytes.Length));
+                }
+
+                // 7. Обычный текст / код (.txt, .log, .ini, .cfg, .html, .css, .js, .ts, .cs, .py, .cpp, .sql, .md, .yml, .bat, .ps1 и т.д.)
+                return DecodeTextFromBytes(bytes);
             }
             catch (Exception ex)
             {
                 return "Ошибка при чтении файла:\n" + ex.Message;
+            }
+        }
+
+        private static byte[] ReadAllBytesShared(string path)
+        {
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                byte[] buf = new byte[fs.Length];
+                int total = 0;
+                while (total < buf.Length)
+                {
+                    int n = fs.Read(buf, total, buf.Length - total);
+                    if (n <= 0) break;
+                    total += n;
+                }
+                return buf;
+            }
+        }
+
+        private static string DecodeTextFromBytes(byte[] bytes)
+        {
+            if (bytes == null || bytes.Length == 0) return "";
+
+            // Проверка BOM: UTF-8
+            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            {
+                return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+            }
+            // UTF-16 LE
+            if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+            {
+                return Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+            }
+
+            // Попытка раскодировать как UTF-8
+            string utf8Text = Encoding.UTF8.GetString(bytes);
+            if (!utf8Text.Contains("\uFFFD"))
+            {
+                return utf8Text;
+            }
+            // Иначе Windows-1251
+            try
+            {
+                return Encoding.GetEncoding(1251).GetString(bytes);
+            }
+            catch
+            {
+                return utf8Text;
+            }
+        }
+
+        private static bool IsBinaryFile(byte[] bytes)
+        {
+            if (bytes == null || bytes.Length == 0) return false;
+            int checkLen = Math.Min(bytes.Length, 4096);
+            for (int i = 0; i < checkLen; i++)
+            {
+                if (bytes[i] == 0) return true;
+            }
+            return false;
+        }
+
+        private static string FormatXml(string rawXml)
+        {
+            if (string.IsNullOrEmpty(rawXml)) return "[XML файл пуст]";
+            try
+            {
+                var doc = new XmlDocument();
+                doc.LoadXml(rawXml);
+                var sb = new StringBuilder();
+                var settings = new XmlWriterSettings
+                {
+                    Indent = true,
+                    IndentChars = "  ",
+                    NewLineChars = "\r\n",
+                    OmitXmlDeclaration = false
+                };
+                using (var writer = XmlWriter.Create(sb, settings))
+                {
+                    doc.Save(writer);
+                }
+                return sb.ToString();
+            }
+            catch
+            {
+                // Если парсинг XML завершился с ошибкой (например фрагмент), возвращаем исходный текст
+                return rawXml;
+            }
+        }
+
+        private static string FormatJson(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return "[JSON пуст]";
+            try
+            {
+                var sb = new StringBuilder();
+                int indent = 0;
+                bool inQuotes = false;
+                for (int i = 0; i < json.Length; i++)
+                {
+                    char ch = json[i];
+                    if (ch == '\\' && i + 1 < json.Length && inQuotes)
+                    {
+                        sb.Append(ch);
+                        sb.Append(json[++i]);
+                        continue;
+                    }
+                    if (ch == '"')
+                    {
+                        inQuotes = !inQuotes;
+                        sb.Append(ch);
+                        continue;
+                    }
+                    if (!inQuotes)
+                    {
+                        if (ch == '{' || ch == '[')
+                        {
+                            sb.Append(ch);
+                            sb.AppendLine();
+                            indent++;
+                            sb.Append(new string(' ', indent * 2));
+                            continue;
+                        }
+                        if (ch == '}' || ch == ']')
+                        {
+                            sb.AppendLine();
+                            indent--;
+                            if (indent < 0) indent = 0;
+                            sb.Append(new string(' ', indent * 2));
+                            sb.Append(ch);
+                            continue;
+                        }
+                        if (ch == ',')
+                        {
+                            sb.Append(ch);
+                            sb.AppendLine();
+                            sb.Append(new string(' ', indent * 2));
+                            continue;
+                        }
+                        if (ch == ':')
+                        {
+                            sb.Append(": ");
+                            continue;
+                        }
+                        if (char.IsWhiteSpace(ch)) continue;
+                    }
+                    sb.Append(ch);
+                }
+                return sb.ToString().Trim();
+            }
+            catch
+            {
+                return json;
             }
         }
 
@@ -661,7 +869,7 @@ namespace PasteImageAsFile
         {
             try
             {
-                byte[] bytes = File.ReadAllBytes(docPath);
+                byte[] bytes = ReadAllBytesShared(docPath);
                 var sb = new StringBuilder();
                 int minLen = 4;
                 var current = new StringBuilder();
