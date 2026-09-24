@@ -267,6 +267,8 @@ namespace PasteImageAsFile
             {
                 bool active = (i == currentTabIndex);
                 tabButtons[i].ForeColor = active ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary;
+                tabButtons[i].FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+                tabButtons[i].FlatAppearance.MouseDownBackColor = ThemeHelper.CardBackground;
             }
 
             this.Invalidate();
@@ -514,9 +516,12 @@ namespace PasteImageAsFile
                     BackColor = Color.Transparent,
                     ForeColor = (i == currentTabIndex) ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary,
                     Font = new Font("Segoe UI", 8.5f, (i == currentTabIndex) ? FontStyle.Bold : FontStyle.Regular),
-                    Cursor = Cursors.Hand
+                    Cursor = Cursors.Hand,
+                    TabStop = false
                 };
                 tabBtn.FlatAppearance.BorderSize = 0;
+                tabBtn.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+                tabBtn.FlatAppearance.MouseDownBackColor = ThemeHelper.CardBackground;
                 tabBtn.Click += (s, e) => SwitchTab(tabIdx);
 
                 tabButtons.Add(tabBtn);
@@ -875,6 +880,7 @@ namespace PasteImageAsFile
                 bool active = (i == tabIndex);
                 tabButtons[i].Font = new Font("Segoe UI", 8.5f, active ? FontStyle.Bold : FontStyle.Regular);
                 tabButtons[i].ForeColor = active ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary;
+                tabButtons[i].BackColor = Color.Transparent;
             }
             pnlTabs.Invalidate();
             RefreshItems();
@@ -1170,6 +1176,9 @@ namespace PasteImageAsFile
             }
 
             // Наведение и события клика/двойного клика
+            Point dragStartPt = Point.Empty;
+            bool isPotentialDrag = false;
+
             Action<Control> attachEvents = null;
             attachEvents = (c) => {
                 c.MouseEnter += (s, e) => { card.BackColor = ThemeHelper.CardHover; };
@@ -1189,12 +1198,30 @@ namespace PasteImageAsFile
                     }
                 };
 
-                // Зажатие и начало перетаскивания (Drag out)
+                // Запоминаем точку нажатия для детекции Drag vs Click
                 c.MouseDown += (s, e) => {
                     if (e.Button == MouseButtons.Left && e.Clicks == 1 && c != btnMenu && c != btnPin && c != btnView)
                     {
-                        StartDragItem(item, card);
+                        dragStartPt = e.Location;
+                        isPotentialDrag = true;
                     }
+                };
+
+                c.MouseMove += (s, e) => {
+                    if (isPotentialDrag && e.Button == MouseButtons.Left && c != btnMenu && c != btnPin && c != btnView)
+                    {
+                        int dx = Math.Abs(e.X - dragStartPt.X);
+                        int dy = Math.Abs(e.Y - dragStartPt.Y);
+                        if (dx >= SystemInformation.DragSize.Width || dy >= SystemInformation.DragSize.Height)
+                        {
+                            isPotentialDrag = false;
+                            StartDragItem(item, card);
+                        }
+                    }
+                };
+
+                c.MouseUp += (s, e) => {
+                    isPotentialDrag = false;
                 };
 
                 foreach (Control sub in c.Controls)
@@ -1356,7 +1383,8 @@ namespace PasteImageAsFile
                 this.previousForegroundWindow = targetWnd;
             }
 
-            if (!isWindowPinned)
+            bool wasPinned = isWindowPinned;
+            if (!wasPinned)
             {
                 CloseFlyout();
             }
@@ -1364,18 +1392,20 @@ namespace PasteImageAsFile
             ThreadPool.QueueUserWorkItem(_ => {
                 try
                 {
-                    Thread.Sleep(50);
+                    Thread.Sleep(wasPinned ? 40 : 80);
                     if (targetWnd != IntPtr.Zero)
                     {
                         Program.ForceForegroundWindow(targetWnd);
-                        Thread.Sleep(40);
+                        Thread.Sleep(50);
                     }
 
                     keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
                     keybd_event(VK_V, 0, 0, UIntPtr.Zero);
-                    Thread.Sleep(20);
+                    Thread.Sleep(30);
                     keybd_event(VK_V, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
                     keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+                    Logger.Log(string.Format("Pasted item {0} into targetWnd={1}", item.Id, targetWnd));
                 }
                 catch (Exception ex)
                 {

@@ -122,11 +122,23 @@ namespace PasteImageAsFile
             RegisterDropTarget(this);
         }
 
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x08000000; // WS_EX_NOACTIVATE - не перехватывает фокус у других окон
+                cp.ExStyle |= 0x00000080; // WS_EX_TOOLWINDOW - не создаёт стандартную рамку DWM
+                return cp;
+            }
+        }
+
         private void ApplyWindowStyles()
         {
             try
             {
-                int corner = DWMWCP_ROUND;
+                // В свернутом состоянии строго DWMWCP_DONOTROUND (1), чтобы не было прозрачных полей и тени
+                int corner = isExpanded ? DWMWCP_ROUND : 1;
                 DwmSetWindowAttribute(this.Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
                 int dark = ThemeHelper.IsDarkTheme() ? 1 : 0;
                 DwmSetWindowAttribute(this.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
@@ -392,11 +404,6 @@ namespace PasteImageAsFile
                             e.Graphics.FillRectangle(b, indX, 4, 3, this.Height - 8);
                         }
                     }
-
-                    using (var borderPen = new Pen(ThemeHelper.CardBorder, 1))
-                    {
-                        e.Graphics.DrawRectangle(borderPen, 0, 0, this.Width - 1, this.Height - 1);
-                    }
                 }
                 else
                 {
@@ -537,11 +544,11 @@ namespace PasteImageAsFile
             {
                 int y = CalculateShelfY(scr) + (ShelfHeightVertical - CollapsedBarLength) / 2;
                 int x = IsPositionOnLeft() ? scr.WorkingArea.Left : (scr.WorkingArea.Right - CollapsedBarThickness);
-                this.Size = new Size(CollapsedBarThickness, CollapsedBarLength);
                 this.Location = new Point(x, y);
                 btnCollapse.Text = IsPositionOnLeft() ? "‹" : "›";
             }
 
+            ApplyWindowStyles();
             this.Visible = true;
             this.Invalidate();
         }
@@ -598,6 +605,7 @@ namespace PasteImageAsFile
             pnlContent.Visible = true;
 
             RefreshItems();
+            ApplyWindowStyles();
             this.BringToFront();
             this.Invalidate();
         }

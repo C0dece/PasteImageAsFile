@@ -37,12 +37,42 @@ namespace PasteImageAsFile
             this.Invalidate();
         }
 
-        protected override void OnMouseDown(MouseEventArgs e)
+        protected override void OnDrawItem(DrawItemEventArgs e)
         {
-            base.OnMouseDown(e);
-            if (e.Button == MouseButtons.Left)
+            if (e.Index < 0 || e.Index >= this.Items.Count) return;
+
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            bool isDark = ThemeHelper.IsDarkTheme();
+            bool isSelected = (e.State & DrawItemState.Selected) != 0;
+
+            Color bg = isDark
+                ? (isSelected ? ThemeHelper.AccentBackground : Color.FromArgb(38, 38, 38))
+                : (isSelected ? ThemeHelper.AccentBackground : Color.FromArgb(255, 255, 255));
+
+            Color textCol = isDark
+                ? (isSelected ? ThemeHelper.Accent : Color.FromArgb(240, 240, 240))
+                : (isSelected ? ThemeHelper.Accent : Color.FromArgb(25, 25, 25));
+
+            using (var brush = new SolidBrush(bg))
             {
-                this.DroppedDown = !this.DroppedDown;
+                g.FillRectangle(brush, e.Bounds);
+            }
+
+            string itemText = this.Items[e.Index].ToString();
+            Rectangle textRect = new Rectangle(e.Bounds.Left + 8, e.Bounds.Top, e.Bounds.Width - 12, e.Bounds.Height);
+            using (var textBrush = new SolidBrush(textCol))
+            using (var sf = new StringFormat
+            {
+                LineAlignment = StringAlignment.Center,
+                Alignment = StringAlignment.Near,
+                Trimming = StringTrimming.EllipsisCharacter,
+                FormatFlags = StringFormatFlags.NoWrap
+            })
+            {
+                g.DrawString(itemText, this.Font, textBrush, textRect, sf);
             }
         }
 

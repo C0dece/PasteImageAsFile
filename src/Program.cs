@@ -283,14 +283,14 @@ namespace PasteImageAsFile
                 {
                     AttachThreadInput(appThread, targetThread, true);
                     BringWindowToTop(hWnd);
-                    ShowWindow(hWnd, SW_RESTORE);
+                    if (IsIconic(hWnd)) ShowWindow(hWnd, SW_RESTORE);
                     SetForegroundWindow(hWnd);
                     AttachThreadInput(appThread, targetThread, false);
                 }
                 else
                 {
                     BringWindowToTop(hWnd);
-                    ShowWindow(hWnd, SW_RESTORE);
+                    if (IsIconic(hWnd)) ShowWindow(hWnd, SW_RESTORE);
                     SetForegroundWindow(hWnd);
                 }
             }
