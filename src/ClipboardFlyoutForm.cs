@@ -176,6 +176,13 @@ namespace PasteImageAsFile
         private int dragStartScrollY = 0;
         private bool isHoveringScroll = false;
 
+        // Анимация плавного появления окна (Fade-in + Slide)
+        private System.Windows.Forms.Timer openAnimTimer;
+        private int openAnimStep = 0;
+        private const int OpenAnimTotalSteps = 8;
+        private Point openTargetLocation;
+        private int openStartY;
+
         public ClipboardFlyoutForm(IntPtr prevFg)
         {
             this.previousForegroundWindow = prevFg;
@@ -290,6 +297,12 @@ namespace PasteImageAsFile
         {
             try
             {
+                if (openAnimTimer != null)
+                {
+                    openAnimTimer.Stop();
+                    openAnimTimer.Dispose();
+                    openAnimTimer = null;
+                }
                 this.Close();
                 this.Dispose();
             }
@@ -301,6 +314,50 @@ namespace PasteImageAsFile
                     if (currentInstance == this) currentInstance = null;
                 }
             }
+        }
+
+        public void AnimateIn(Point targetPoint, bool isFromBottom)
+        {
+            openTargetLocation = targetPoint;
+            int offset = isFromBottom ? 12 : -12;
+            openStartY = targetPoint.Y + offset;
+
+            this.Opacity = 0.05;
+            this.Location = new Point(targetPoint.X, openStartY);
+            this.Show();
+            this.BringToFront();
+            SetForegroundWindow(this.Handle);
+            this.Activate();
+
+            if (openAnimTimer != null)
+            {
+                openAnimTimer.Stop();
+                openAnimTimer.Dispose();
+            }
+
+            openAnimStep = 0;
+            openAnimTimer = new System.Windows.Forms.Timer();
+            openAnimTimer.Interval = 12;
+            openAnimTimer.Tick += (s, e) => {
+                openAnimStep++;
+                float t = (float)openAnimStep / OpenAnimTotalSteps;
+                if (t > 1.0f) t = 1.0f;
+                float ease = (float)(1.0 - Math.Pow(1.0 - t, 3));
+
+                int curY = (int)(openStartY + (openTargetLocation.Y - openStartY) * ease);
+                this.Location = new Point(openTargetLocation.X, curY);
+                this.Opacity = Math.Min(1.0, 0.15 + 0.85 * ease);
+
+                if (openAnimStep >= OpenAnimTotalSteps)
+                {
+                    openAnimTimer.Stop();
+                    openAnimTimer.Dispose();
+                    openAnimTimer = null;
+                    this.Location = openTargetLocation;
+                    this.Opacity = 1.0;
+                }
+            };
+            openAnimTimer.Start();
         }
 
         protected override void WndProc(ref Message m)
@@ -2079,11 +2136,8 @@ namespace PasteImageAsFile
                     if (x + currentInstance.Width > scr.WorkingArea.Right - 8) x = scr.WorkingArea.Right - currentInstance.Width - 8;
                 }
 
-                currentInstance.Location = new Point(x, y);
-                currentInstance.Show();
-                currentInstance.BringToFront();
-                SetForegroundWindow(currentInstance.Handle);
-                currentInstance.Activate();
+                bool isFromBottom = (y > scr.Bounds.Top + scr.Bounds.Height / 2);
+                currentInstance.AnimateIn(new Point(x, y), isFromBottom);
 
                 Logger.Log(string.Format("Flyout shown at ({0},{1}) on {2} with prevFg={3}", x, y, scr.DeviceName, prevFg));
             }

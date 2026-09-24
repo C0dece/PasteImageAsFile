@@ -63,7 +63,7 @@ namespace PasteImageAsFile
         private bool isAnimating = false;
         private bool isExpandingTarget = false;
         private int animCurrentStep = 0;
-        private const int AnimTotalSteps = 8;
+        private const int AnimTotalSteps = 12;
         private Rectangle animStartBounds;
         private Rectangle animTargetBounds;
 
@@ -173,7 +173,7 @@ namespace PasteImageAsFile
 
             // Таймер плавной анимации выдвижения/скрытия полки (Slide-in / Slide-out)
             animTimer = new System.Windows.Forms.Timer();
-            animTimer.Interval = 15;
+            animTimer.Interval = 12;
             animTimer.Tick += OnAnimTick;
 
             // Настройка сплошного приема Drop на всё окно и дочерние контролы
@@ -787,10 +787,50 @@ namespace PasteImageAsFile
             lblTitle.Size = new Size(Math.Max(50, r - 12), 20);
         }
 
+        private void ApplySlideOffset()
+        {
+            if (IsHorizontalPosition())
+            {
+                int h = ShelfHeightHorizontal;
+                int offsetY = IsPositionTop() ? 0 : (this.ClientSize.Height - h);
+                if (pnlHeader != null) pnlHeader.Top = offsetY;
+                int topY = offsetY + 38;
+                if (pnlTabs != null && pnlTabs.Visible)
+                {
+                    pnlTabs.Top = topY;
+                    topY += pnlTabs.Height;
+                }
+                if (pnlSubTabs != null && pnlSubTabs.Visible)
+                {
+                    pnlSubTabs.Top = topY;
+                    topY += pnlSubTabs.Height;
+                }
+                if (dropHint != null && dropHint.Visible)
+                {
+                    dropHint.Top = topY + 3;
+                    topY += 38;
+                }
+                if (pnlContent != null && pnlContent.Visible)
+                {
+                    pnlContent.Top = topY;
+                }
+            }
+            else
+            {
+                int w = ExpandedWidthVertical;
+                int offsetX = IsPositionOnLeft() ? 0 : (this.ClientSize.Width - w);
+                if (pnlHeader != null) pnlHeader.Left = offsetX;
+                if (pnlTabs != null) pnlTabs.Left = offsetX;
+                if (pnlSubTabs != null) pnlSubTabs.Left = offsetX;
+                if (dropHint != null) dropHint.Left = offsetX + 8;
+                if (pnlContent != null) pnlContent.Left = offsetX;
+            }
+        }
+
         private void LayoutShelfContent()
         {
-            int w = this.ClientSize.Width;
-            int h = this.ClientSize.Height;
+            int w = IsHorizontalPosition() ? ExpandedWidthHorizontal : ExpandedWidthVertical;
+            int h = IsHorizontalPosition() ? ShelfHeightHorizontal : ShelfHeightVertical;
 
             if (pnlHeader != null)
             {
@@ -809,7 +849,7 @@ namespace PasteImageAsFile
                 if (pnlTabs.Visible)
                 {
                     pnlTabs.Location = new Point(0, topY);
-                    pnlTabs.Width = w;
+                    pnlTabs.Size = new Size(w, 28);
                     pnlTabs.BringToFront();
                     topY += pnlTabs.Height;
                 }
@@ -823,7 +863,7 @@ namespace PasteImageAsFile
                 if (pnlSubTabs.Visible)
                 {
                     pnlSubTabs.Location = new Point(0, topY);
-                    pnlSubTabs.Width = w;
+                    pnlSubTabs.Size = new Size(w, 28);
                     pnlSubTabs.BringToFront();
                     topY += pnlSubTabs.Height;
                 }
@@ -846,6 +886,8 @@ namespace PasteImageAsFile
                 pnlContent.Location = new Point(0, topY);
                 pnlContent.Size = new Size(w, Math.Max(40, h - topY));
             }
+
+            ApplySlideOffset();
         }
 
         private void UpdateDragModeButtonVisual()
@@ -983,6 +1025,7 @@ namespace PasteImageAsFile
             int curH = (int)(animStartBounds.Height + (animTargetBounds.Height - animStartBounds.Height) * ease);
 
             this.SetBounds(curX, curY, Math.Max(1, curW), Math.Max(1, curH));
+            ApplySlideOffset();
 
             if (animCurrentStep >= AnimTotalSteps)
             {
@@ -992,19 +1035,12 @@ namespace PasteImageAsFile
 
                 if (!isExpandingTarget)
                 {
-                    this.isExpanded = false;
-                    pnlHeader.Visible = false;
-                    if (pnlTabs != null) pnlTabs.Visible = false;
-                    if (pnlSubTabs != null) pnlSubTabs.Visible = false;
-                    dropHint.Visible = false;
-                    pnlContent.Visible = false;
-                    ApplyWindowStyles();
-                    this.Invalidate();
+                    PositionCollapsed();
                 }
                 else
                 {
                     this.isExpanded = true;
-                    LayoutShelfContent();
+                    ApplySlideOffset();
                     ApplyWindowStyles();
                     this.BringToFront();
                     this.Invalidate();
@@ -1048,7 +1084,7 @@ namespace PasteImageAsFile
             if (!animate)
             {
                 this.SetBounds(target.X, target.Y, target.Width, target.Height);
-                LayoutShelfContent();
+                ApplySlideOffset();
                 this.BringToFront();
                 this.Invalidate();
                 return;
@@ -1059,6 +1095,7 @@ namespace PasteImageAsFile
             isExpandingTarget = true;
             isAnimating = true;
             animCurrentStep = 0;
+            ApplySlideOffset();
             animTimer.Start();
         }
 
@@ -1360,8 +1397,13 @@ namespace PasteImageAsFile
             else pic.Image = SystemIcons.Application.ToBitmap();
             card.Controls.Add(pic);
 
-            // Кнопка удаления [✕] (26x26)
-            Button btnRemove = CreateToolButton("✕", card.Width - 32, 16, 26, 26, "Убрать файл с полки SuperHub");
+            // Сетка кнопок действий 2x2 справа (24x24)
+            // Верх: [👁] и [✕]
+            Button btnView = CreateToolButton("👁", card.Width - 54, 4, 24, 24, "Просмотр содержимого файла или текста");
+            btnView.Click += (s, e) => ItemViewerForm.ShowViewer(item, targetPath);
+            card.Controls.Add(btnView);
+
+            Button btnRemove = CreateToolButton("✕", card.Width - 26, 4, 24, 24, "Убрать файл с полки SuperHub");
             btnRemove.MouseEnter += (s, e) => { btnRemove.BackColor = Color.FromArgb(196, 43, 28); btnRemove.ForeColor = Color.White; };
             btnRemove.MouseLeave += (s, e) => { btnRemove.BackColor = Color.Transparent; btnRemove.ForeColor = ThemeHelper.TextSecondary; };
             btnRemove.Click += (s, e) => {
@@ -1370,10 +1412,25 @@ namespace PasteImageAsFile
             };
             card.Controls.Add(btnRemove);
 
-            // Кнопка предпросмотра [👁] (26x26)
-            Button btnView = CreateToolButton("👁", card.Width - 62, 16, 26, 26, "Просмотр содержимого файла или текста");
-            btnView.Click += (s, e) => ItemViewerForm.ShowViewer(item, targetPath);
-            card.Controls.Add(btnView);
+            // Низ: [📥] и [▷] или [···]
+            Button btnPaste = CreateToolButton("📥", card.Width - 54, 30, 24, 24, "Вставить в активное окно (Ctrl+V)");
+            btnPaste.Click += (s, e) => PasteItem(item);
+            card.Controls.Add(btnPaste);
+
+            Button btnAction;
+            if (!string.IsNullOrEmpty(targetPath) && (SafeFileExists(targetPath) || SafeDirectoryExists(targetPath)))
+            {
+                btnAction = CreateToolButton("▷", card.Width - 26, 30, 24, 24, "Открыть в ассоциированной программе");
+                btnAction.Click += (s, e) => LaunchFile(targetPath);
+            }
+            else
+            {
+                btnAction = CreateToolButton("···", card.Width - 26, 30, 24, 24, "Меню действий");
+                btnAction.Click += (s, e) => {
+                    if (card.ContextMenu != null) card.ContextMenu.Show(btnAction, new Point(0, btnAction.Height));
+                };
+            }
+            card.Controls.Add(btnAction);
 
             // Заголовок
             Label lblName = new Label
@@ -1381,8 +1438,8 @@ namespace PasteImageAsFile
                 Text = title,
                 Font = new Font("Segoe UI Semibold", 8.5f, FontStyle.Bold),
                 ForeColor = ThemeHelper.TextPrimary,
-                Location = new Point(46, 10),
-                Size = new Size(card.Width - 114, 18),
+                Location = new Point(46, 9),
+                Size = new Size(card.Width - 110, 18),
                 AutoEllipsis = true,
                 Cursor = Cursors.Hand
             };
@@ -1394,8 +1451,8 @@ namespace PasteImageAsFile
                 Text = sub,
                 Font = new Font("Segoe UI", 7.5f),
                 ForeColor = ThemeHelper.TextSecondary,
-                Location = new Point(46, 32),
-                Size = new Size(card.Width - 114, 16),
+                Location = new Point(46, 31),
+                Size = new Size(card.Width - 110, 16),
                 AutoEllipsis = true,
                 Cursor = Cursors.Hand
             };
@@ -1403,13 +1460,14 @@ namespace PasteImageAsFile
 
             // Контекстное меню
             ContextMenu cardMenu = new ContextMenu();
-            cardMenu.MenuItems.Add(new MenuItem("👁 Просмотр / Детали", (s, e) => ItemViewerForm.ShowViewer(item, targetPath)));
+            cardMenu.MenuItems.Add(new MenuItem("Просмотр / Детали", (s, e) => ItemViewerForm.ShowViewer(item, targetPath)));
             if (!string.IsNullOrEmpty(targetPath) && (SafeFileExists(targetPath) || SafeDirectoryExists(targetPath)))
             {
-                cardMenu.MenuItems.Add(new MenuItem("▷ Открыть в системе", (s, e) => LaunchFile(targetPath)));
+                cardMenu.MenuItems.Add(new MenuItem("Открыть в системе", (s, e) => LaunchFile(targetPath)));
                 cardMenu.MenuItems.Add(new MenuItem("Показать в Проводнике", (s, e) => ShowInExplorer(targetPath)));
                 cardMenu.MenuItems.Add(new MenuItem("-"));
             }
+            cardMenu.MenuItems.Add(new MenuItem("Вставить в активное окно (Ctrl+V)", (s, e) => PasteItem(item)));
             cardMenu.MenuItems.Add(new MenuItem("Скопировать в буфер", (s, e) => CopyItem(item)));
             cardMenu.MenuItems.Add(new MenuItem("Удалить с полки", (s, e) => {
                 ClipboardHistoryManager.Instance.ToggleSuperHub(item.Id);
@@ -1417,30 +1475,65 @@ namespace PasteImageAsFile
             }));
             card.ContextMenu = cardMenu;
 
+            Point dragStartPt = Point.Empty;
+            bool isPotentialDrag = false;
+
             Action<Control> attachEvents = null;
             attachEvents = (c) => {
+                if (c is Button) return;
+
                 c.MouseEnter += (s, e) => card.BackColor = ThemeHelper.CardHover;
                 c.MouseLeave += (s, e) => card.BackColor = ThemeHelper.CardBackground;
 
+                c.Click += (s, e) => {
+                    CopyItem(item);
+                };
+
                 c.DoubleClick += (s, e) => {
-                    if (c != btnRemove && c != btnView)
+                    if (item.Type == ClipboardItemType.Files && !string.IsNullOrEmpty(targetPath))
+                    {
+                        LaunchFile(targetPath);
+                    }
+                    else
                     {
                         ItemViewerForm.ShowViewer(item, targetPath);
                     }
                 };
 
                 c.MouseDown += (s, e) => {
-                    if (e.Button == MouseButtons.Left && c != btnRemove && c != btnView)
+                    if (e.Button == MouseButtons.Left && e.Clicks == 1)
                     {
-                        StartDragOut(item, card);
+                        dragStartPt = e.Location;
+                        isPotentialDrag = true;
                     }
+                };
+
+                c.MouseMove += (s, e) => {
+                    if (isPotentialDrag && e.Button == MouseButtons.Left)
+                    {
+                        int dx = Math.Abs(e.X - dragStartPt.X);
+                        int dy = Math.Abs(e.Y - dragStartPt.Y);
+                        if (dx >= SystemInformation.DragSize.Width || dy >= SystemInformation.DragSize.Height)
+                        {
+                            isPotentialDrag = false;
+                            StartDragOut(item, card);
+                        }
+                    }
+                };
+
+                c.MouseUp += (s, e) => {
+                    isPotentialDrag = false;
                 };
 
                 foreach (Control subCtrl in c.Controls) attachEvents(subCtrl);
             };
             attachEvents(card);
 
-            toolTip.SetToolTip(card, "Двойной клик: предпросмотр\nЗажать и потянуть: перетащить наружу (" + (Config.SuperHubDragMode == "Move" ? "Перемещение" : "Копирование") + ")");
+            string cardTip = "Клик: скопировать в буфер\nДвойной клик: открыть\nЗажать и потянуть: перетащить наружу (" + (Config.SuperHubDragMode == "Move" ? "Перемещение" : "Копирование") + ")";
+            toolTip.SetToolTip(card, cardTip);
+            toolTip.SetToolTip(lblName, cardTip);
+            toolTip.SetToolTip(lblSub, cardTip);
+            toolTip.SetToolTip(pic, cardTip);
             return card;
         }
 
@@ -1565,30 +1658,64 @@ namespace PasteImageAsFile
             }));
             card.ContextMenu = cardMenu;
 
+            Point dragStartPt = Point.Empty;
+            bool isPotentialDrag = false;
+
             Action<Control> attachEvents = null;
             attachEvents = (c) => {
+                if (c is Button) return;
+
                 c.MouseEnter += (s, e) => card.BackColor = ThemeHelper.CardHover;
                 c.MouseLeave += (s, e) => card.BackColor = ThemeHelper.CardBackground;
 
+                c.Click += (s, e) => {
+                    CopyItem(item);
+                };
+
                 c.DoubleClick += (s, e) => {
-                    if (c != btnRemove && c != btnView)
+                    if (item.Type == ClipboardItemType.Files && !string.IsNullOrEmpty(targetPath))
+                    {
+                        LaunchFile(targetPath);
+                    }
+                    else
                     {
                         ItemViewerForm.ShowViewer(item, targetPath);
                     }
                 };
 
                 c.MouseDown += (s, e) => {
-                    if (e.Button == MouseButtons.Left && c != btnRemove && c != btnView)
+                    if (e.Button == MouseButtons.Left && e.Clicks == 1)
                     {
-                        StartDragOut(item, card);
+                        dragStartPt = e.Location;
+                        isPotentialDrag = true;
                     }
+                };
+
+                c.MouseMove += (s, e) => {
+                    if (isPotentialDrag && e.Button == MouseButtons.Left)
+                    {
+                        int dx = Math.Abs(e.X - dragStartPt.X);
+                        int dy = Math.Abs(e.Y - dragStartPt.Y);
+                        if (dx >= SystemInformation.DragSize.Width || dy >= SystemInformation.DragSize.Height)
+                        {
+                            isPotentialDrag = false;
+                            StartDragOut(item, card);
+                        }
+                    }
+                };
+
+                c.MouseUp += (s, e) => {
+                    isPotentialDrag = false;
                 };
 
                 foreach (Control subCtrl in c.Controls) attachEvents(subCtrl);
             };
             attachEvents(card);
 
-            toolTip.SetToolTip(card, "Двойной клик: предпросмотр\nЗажать и потянуть: перетащить наружу (" + (Config.SuperHubDragMode == "Move" ? "Перемещение" : "Копирование") + ")");
+            string cardTip = "Клик: скопировать в буфер\nДвойной клик: открыть\nЗажать и потянуть: перетащить наружу (" + (Config.SuperHubDragMode == "Move" ? "Перемещение" : "Копирование") + ")";
+            toolTip.SetToolTip(card, cardTip);
+            toolTip.SetToolTip(lblName, cardTip);
+            toolTip.SetToolTip(lblSub, cardTip);
             return card;
         }
 
@@ -1654,8 +1781,13 @@ namespace PasteImageAsFile
             else pic.Image = SystemIcons.Application.ToBitmap();
             card.Controls.Add(pic);
 
-            // Кнопка закрепления [📌] (26x26)
-            Button btnPinItem = CreateToolButton("📌", card.Width - 32, 16, 26, 26, item.IsPinned ? "Открепить" : "Закрепить вверху");
+            // Сетка кнопок действий 2x2 справа (24x24)
+            // Верх: [📥] и [📌]
+            Button btnPaste = CreateToolButton("📥", card.Width - 54, 4, 24, 24, "Вставить в активное окно (Ctrl+V)");
+            btnPaste.Click += (s, e) => PasteItem(item);
+            card.Controls.Add(btnPaste);
+
+            Button btnPinItem = CreateToolButton("📌", card.Width - 26, 4, 24, 24, item.IsPinned ? "Открепить" : "Закрепить вверху");
             btnPinItem.ForeColor = item.IsPinned ? ThemeHelper.Accent : ThemeHelper.TextSecondary;
             btnPinItem.Click += (s, e) => {
                 ClipboardHistoryManager.Instance.TogglePin(item.Id);
@@ -1663,15 +1795,25 @@ namespace PasteImageAsFile
             };
             card.Controls.Add(btnPinItem);
 
-            // Кнопка быстрой вставки [📥] (26x26)
-            Button btnPaste = CreateToolButton("📥", card.Width - 62, 16, 26, 26, "Вставить в активное окно (Ctrl+V)");
-            btnPaste.Click += (s, e) => PasteItem(item);
-            card.Controls.Add(btnPaste);
-
-            // Кнопка предпросмотра [👁] (26x26)
-            Button btnView = CreateToolButton("👁", card.Width - 92, 16, 26, 26, "Просмотр содержимого");
+            // Низ: [👁] и [▷] или [···]
+            Button btnView = CreateToolButton("👁", card.Width - 54, 30, 24, 24, "Просмотр содержимого");
             btnView.Click += (s, e) => ItemViewerForm.ShowViewer(item, targetPath);
             card.Controls.Add(btnView);
+
+            Button btnAction;
+            if (!string.IsNullOrEmpty(targetPath) && (SafeFileExists(targetPath) || SafeDirectoryExists(targetPath)))
+            {
+                btnAction = CreateToolButton("▷", card.Width - 26, 30, 24, 24, "Открыть в ассоциированной программе");
+                btnAction.Click += (s, e) => LaunchFile(targetPath);
+            }
+            else
+            {
+                btnAction = CreateToolButton("···", card.Width - 26, 30, 24, 24, "Меню действий");
+                btnAction.Click += (s, e) => {
+                    if (card.ContextMenu != null) card.ContextMenu.Show(btnAction, new Point(0, btnAction.Height));
+                };
+            }
+            card.Controls.Add(btnAction);
 
             // Заголовок
             Label lblName = new Label
@@ -1679,8 +1821,8 @@ namespace PasteImageAsFile
                 Text = title,
                 Font = new Font("Segoe UI Semibold", 8.5f, FontStyle.Bold),
                 ForeColor = ThemeHelper.TextPrimary,
-                Location = new Point(46, 10),
-                Size = new Size(card.Width - 144, 18),
+                Location = new Point(46, 9),
+                Size = new Size(card.Width - 110, 18),
                 AutoEllipsis = true,
                 Cursor = Cursors.Hand
             };
@@ -1692,8 +1834,8 @@ namespace PasteImageAsFile
                 Text = sub,
                 Font = new Font("Segoe UI", 7.5f),
                 ForeColor = ThemeHelper.TextSecondary,
-                Location = new Point(46, 32),
-                Size = new Size(card.Width - 144, 16),
+                Location = new Point(46, 31),
+                Size = new Size(card.Width - 110, 16),
                 AutoEllipsis = true,
                 Cursor = Cursors.Hand
             };
@@ -1702,6 +1844,12 @@ namespace PasteImageAsFile
             // Контекстное меню
             ContextMenu cardMenu = new ContextMenu();
             cardMenu.MenuItems.Add(new MenuItem("Просмотр / Детали", (s, e) => ItemViewerForm.ShowViewer(item, targetPath)));
+            if (!string.IsNullOrEmpty(targetPath) && (SafeFileExists(targetPath) || SafeDirectoryExists(targetPath)))
+            {
+                cardMenu.MenuItems.Add(new MenuItem("Открыть в системе", (s, e) => LaunchFile(targetPath)));
+                cardMenu.MenuItems.Add(new MenuItem("Показать в Проводнике", (s, e) => ShowInExplorer(targetPath)));
+                cardMenu.MenuItems.Add(new MenuItem("-"));
+            }
             cardMenu.MenuItems.Add(new MenuItem("Вставить в каретку (Ctrl+V)", (s, e) => PasteItem(item)));
             cardMenu.MenuItems.Add(new MenuItem("Скопировать в буфер", (s, e) => CopyItem(item)));
             cardMenu.MenuItems.Add(new MenuItem(item.IsPinned ? "Открепить" : "Закрепить вверху", (s, e) => {
@@ -1719,37 +1867,67 @@ namespace PasteImageAsFile
             }));
             card.ContextMenu = cardMenu;
 
+            Point dragStartPt = Point.Empty;
+            bool isPotentialDrag = false;
+
             Action<Control> attachEvents = null;
             attachEvents = (c) => {
+                if (c is Button) return;
+
                 c.MouseEnter += (s, e) => card.BackColor = ThemeHelper.CardHover;
                 c.MouseLeave += (s, e) => card.BackColor = ThemeHelper.CardBackground;
 
                 c.Click += (s, e) => {
-                    if (c == btnPinItem || c == btnPaste || c == btnView) return;
                     bool isPasteAction = string.Equals(Config.ClipboardClickAction, "Paste", StringComparison.OrdinalIgnoreCase);
                     if (isPasteAction) PasteItem(item);
                     else CopyItem(item);
                 };
 
                 c.DoubleClick += (s, e) => {
-                    if (c != btnPinItem && c != btnPaste && c != btnView)
+                    if (item.Type == ClipboardItemType.Files && !string.IsNullOrEmpty(targetPath))
+                    {
+                        LaunchFile(targetPath);
+                    }
+                    else
                     {
                         ItemViewerForm.ShowViewer(item, targetPath);
                     }
                 };
 
                 c.MouseDown += (s, e) => {
-                    if (e.Button == MouseButtons.Left && c != btnPinItem && c != btnPaste && c != btnView)
+                    if (e.Button == MouseButtons.Left && e.Clicks == 1)
                     {
-                        StartDragOut(item, card);
+                        dragStartPt = e.Location;
+                        isPotentialDrag = true;
                     }
+                };
+
+                c.MouseMove += (s, e) => {
+                    if (isPotentialDrag && e.Button == MouseButtons.Left)
+                    {
+                        int dx = Math.Abs(e.X - dragStartPt.X);
+                        int dy = Math.Abs(e.Y - dragStartPt.Y);
+                        if (dx >= SystemInformation.DragSize.Width || dy >= SystemInformation.DragSize.Height)
+                        {
+                            isPotentialDrag = false;
+                            StartDragOut(item, card);
+                        }
+                    }
+                };
+
+                c.MouseUp += (s, e) => {
+                    isPotentialDrag = false;
                 };
 
                 foreach (Control subCtrl in c.Controls) attachEvents(subCtrl);
             };
             attachEvents(card);
 
-            toolTip.SetToolTip(card, "Клик: " + (Config.ClipboardClickAction == "Paste" ? "вставить" : "скопировать") + "\nДвойной клик: предпросмотр");
+            string cardTip = "Клик: " + (Config.ClipboardClickAction == "Paste" ? "вставить" : "скопировать") + "\nДвойной клик: открыть\nЗажать и потянуть: перетащить (Drag & Drop)";
+            toolTip.SetToolTip(card, cardTip);
+            toolTip.SetToolTip(lblName, cardTip);
+            toolTip.SetToolTip(lblSub, cardTip);
+            toolTip.SetToolTip(pic, cardTip);
             return card;
         }
 
@@ -1857,37 +2035,66 @@ namespace PasteImageAsFile
             };
             card.Controls.Add(lblSub);
 
+            Point dragStartPt = Point.Empty;
+            bool isPotentialDrag = false;
+
             Action<Control> attachEvents = null;
             attachEvents = (c) => {
+                if (c is Button) return;
+
                 c.MouseEnter += (s, e) => card.BackColor = ThemeHelper.CardHover;
                 c.MouseLeave += (s, e) => card.BackColor = ThemeHelper.CardBackground;
 
                 c.Click += (s, e) => {
-                    if (c == btnPinItem || c == btnView) return;
                     bool isPasteAction = string.Equals(Config.ClipboardClickAction, "Paste", StringComparison.OrdinalIgnoreCase);
                     if (isPasteAction) PasteItem(item);
                     else CopyItem(item);
                 };
 
                 c.DoubleClick += (s, e) => {
-                    if (c != btnPinItem && c != btnView)
+                    if (item.Type == ClipboardItemType.Files && !string.IsNullOrEmpty(targetPath))
+                    {
+                        LaunchFile(targetPath);
+                    }
+                    else
                     {
                         ItemViewerForm.ShowViewer(item, targetPath);
                     }
                 };
 
                 c.MouseDown += (s, e) => {
-                    if (e.Button == MouseButtons.Left && c != btnPinItem && c != btnView)
+                    if (e.Button == MouseButtons.Left && e.Clicks == 1)
                     {
-                        StartDragOut(item, card);
+                        dragStartPt = e.Location;
+                        isPotentialDrag = true;
                     }
+                };
+
+                c.MouseMove += (s, e) => {
+                    if (isPotentialDrag && e.Button == MouseButtons.Left)
+                    {
+                        int dx = Math.Abs(e.X - dragStartPt.X);
+                        int dy = Math.Abs(e.Y - dragStartPt.Y);
+                        if (dx >= SystemInformation.DragSize.Width || dy >= SystemInformation.DragSize.Height)
+                        {
+                            isPotentialDrag = false;
+                            StartDragOut(item, card);
+                        }
+                    }
+                };
+
+                c.MouseUp += (s, e) => {
+                    isPotentialDrag = false;
                 };
 
                 foreach (Control subCtrl in c.Controls) attachEvents(subCtrl);
             };
             attachEvents(card);
 
-            toolTip.SetToolTip(card, "Клик: " + (Config.ClipboardClickAction == "Paste" ? "вставить" : "скопировать") + "\nДвойной клик: предпросмотр");
+            string cardTip = "Клик: " + (Config.ClipboardClickAction == "Paste" ? "вставить" : "скопировать") + "\nДвойной клик: открыть\nЗажать и потянуть: перетащить (Drag & Drop)";
+            toolTip.SetToolTip(card, cardTip);
+            toolTip.SetToolTip(lblName, cardTip);
+            toolTip.SetToolTip(lblSub, cardTip);
             return card;
         }
 
