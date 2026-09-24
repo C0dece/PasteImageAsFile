@@ -3,32 +3,142 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.Windows.Forms;
 
 namespace PasteImageAsFile
 {
+    public class FluentComboBox : ComboBox
+    {
+        private bool isHovered = false;
+
+        public FluentComboBox()
+        {
+            this.SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            this.DrawMode = DrawMode.OwnerDrawFixed;
+            this.DropDownStyle = ComboBoxStyle.DropDownList;
+            this.FlatStyle = FlatStyle.Flat;
+            this.ItemHeight = 22;
+            this.Font = new Font("Segoe UI", 9f);
+            this.Cursor = Cursors.Hand;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            base.OnMouseEnter(e);
+            isHovered = true;
+            this.Invalidate();
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            isHovered = false;
+            this.Invalidate();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button == MouseButtons.Left)
+            {
+                this.DroppedDown = !this.DroppedDown;
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            bool isDark = ThemeHelper.IsDarkTheme();
+            Color bg = isDark
+                ? (isHovered ? Color.FromArgb(50, 50, 50) : Color.FromArgb(38, 38, 38))
+                : (isHovered ? Color.FromArgb(240, 240, 240) : Color.FromArgb(255, 255, 255));
+
+            Color borderColor = isDark
+                ? (isHovered ? Color.FromArgb(90, 90, 90) : Color.FromArgb(60, 60, 60))
+                : (isHovered ? Color.FromArgb(160, 160, 160) : Color.FromArgb(210, 210, 210));
+
+            Color textColor = isDark ? Color.FromArgb(240, 240, 240) : Color.FromArgb(25, 25, 25);
+            Color arrowColor = isDark ? Color.FromArgb(210, 210, 210) : Color.FromArgb(90, 90, 90);
+
+            // 1. Фон контрола
+            using (var b = new SolidBrush(bg))
+            {
+                g.FillRectangle(b, 0, 0, this.Width, this.Height);
+            }
+
+            // 2. Текст выбранного пункта
+            string text = (this.SelectedItem != null) ? this.SelectedItem.ToString() : this.Text;
+            if (!string.IsNullOrEmpty(text))
+            {
+                Rectangle textRect = new Rectangle(10, 0, this.Width - 34, this.Height);
+                using (var brush = new SolidBrush(textColor))
+                using (var sf = new StringFormat
+                {
+                    LineAlignment = StringAlignment.Center,
+                    Alignment = StringAlignment.Near,
+                    Trimming = StringTrimming.EllipsisCharacter,
+                    FormatFlags = StringFormatFlags.NoWrap
+                })
+                {
+                    g.DrawString(text, this.Font, brush, textRect, sf);
+                }
+            }
+
+            // 3. Аккуратный шеврон ∨ справа
+            int cx = this.Width - 16;
+            int cy = this.Height / 2;
+            using (var p = new Pen(arrowColor, 1.5f))
+            {
+                g.DrawLine(p, cx - 4, cy - 2, cx, cy + 2);
+                g.DrawLine(p, cx, cy + 2, cx + 4, cy - 2);
+            }
+
+            // 4. Тонкая рамка 1px
+            using (var p = new Pen(borderColor, 1))
+            {
+                g.DrawRectangle(p, 0, 0, this.Width - 1, this.Height - 1);
+            }
+        }
+    }
+
     public class MainForm : Form
     {
         private Panel pnlHeader;
         private Label lblAppTitle;
         private Label lblVersion;
+
+        // Карточка статуса
+        private Panel pnlStatusCard;
         private Panel pnlStatusDot;
         private Label lblStatus;
         private Label lblStatusSub;
         private Button btnToggleDaemon;
 
+        // Карточка интеграции
         private Panel pnlCardInstall;
+        private Label lblInstallTitle;
+        private Label lblInstallSub;
         private Button btnInstall;
         private Button btnUninstall;
 
-        // Вкладки настроек
-        private TabControl tabSettings;
-        private TabPage tabGeneral;
-        private TabPage tabClipboard;
-        private TabPage tabSuperHub;
+        // Fluent навигация по вкладкам
+        private Panel pnlTabNav;
+        private readonly List<Button> navTabButtons = new List<Button>();
+        private int currentTabIndex = 0;
+        private readonly string[] tabTitles = new string[] { "Основные", "Буфер обмена", "SuperHub" };
 
-        // General
-        private ComboBox cmbTheme;
+        // Карточка настроек (контейнер страниц)
+        private Panel pnlSettingsCard;
+        private Panel pnlPageGeneral;
+        private Panel pnlPageClipboard;
+        private Panel pnlPageSuperHub;
+
+        // Элементы страницы "Основные"
+        private FluentComboBox cmbTheme;
         private CheckBox chkAutoRun;
         private CheckBox chkContextMenu;
         private CheckBox chkClassicContextMenuWin11;
@@ -37,20 +147,21 @@ namespace PasteImageAsFile
         private Label lblPrefix;
         private TextBox txtPrefix;
 
-        // Clipboard
-        private ComboBox cmbClipboardClickAction;
+        // Элементы страницы "Буфер обмена"
+        private FluentComboBox cmbClipboardClickAction;
         private CheckBox chkTrayClickOpensClipboard;
         private CheckBox chkShowHistoryMenu;
         private CheckBox chkHistoryRememberText;
         private CheckBox chkHistoryRememberFiles;
 
-        // SuperHub
+        // Элементы страницы "SuperHub"
         private CheckBox chkSuperHubEnabled;
-        private ComboBox cmbSuperHubPosition;
-        private ComboBox cmbSuperHubDragMode;
-        private NumericUpDown numSuperHubSens;
+        private FluentComboBox cmbSuperHubPosition;
+        private FluentComboBox cmbSuperHubDragMode;
+        private FluentComboBox cmbSuperHubSens;
         private Button btnTestSuperHub;
 
+        // Подвал формы
         private Panel pnlFooter;
         private Button btnOpenCache;
         private Button btnHideToTray;
@@ -61,8 +172,8 @@ namespace PasteImageAsFile
         public MainForm()
         {
             toolTip = new ToolTip();
-            toolTip.AutoPopDelay = 5000;
-            toolTip.InitialDelay = 400;
+            toolTip.AutoPopDelay = 6000;
+            toolTip.InitialDelay = 300;
 
             InitializeComponent();
             LoadConfigToUi();
@@ -87,15 +198,15 @@ namespace PasteImageAsFile
             this.SuspendLayout();
 
             this.Text = "PasteImageAsFile - Настройки";
-            this.Size = new Size(520, 770);
-            this.MinimumSize = new Size(520, 770);
-            this.MaximumSize = new Size(520, 770);
+            this.Size = new Size(530, 770);
+            this.MinimumSize = new Size(530, 770);
+            this.MaximumSize = new Size(530, 770);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.Font = new Font("Segoe UI", 9f);
 
-            // Иконка
+            // Иконка приложения
             try
             {
                 string icoPath = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "app.ico");
@@ -110,7 +221,7 @@ namespace PasteImageAsFile
             }
             catch {}
 
-            // 1. Header (70px)
+            // 1. Верхний заголовок (Header)
             pnlHeader = new Panel
             {
                 Dock = DockStyle.Top,
@@ -121,17 +232,17 @@ namespace PasteImageAsFile
             lblAppTitle = new Label
             {
                 Text = "PasteImageAsFile",
-                Font = new Font("Segoe UI Semibold", 13f, FontStyle.Bold),
+                Font = new Font("Segoe UI Semibold", 13.5f, FontStyle.Bold),
                 ForeColor = Color.White,
                 AutoSize = true,
-                Location = new Point(20, 14)
+                Location = new Point(20, 12)
             };
 
             lblVersion = new Label
             {
                 Text = "v" + ShellIntegration.AppVersion,
                 Font = new Font("Segoe UI", 8.5f),
-                ForeColor = Color.FromArgb(150, 165, 185),
+                ForeColor = Color.FromArgb(145, 160, 180),
                 AutoSize = true,
                 Location = new Point(20, 42)
             };
@@ -139,8 +250,8 @@ namespace PasteImageAsFile
             pnlHeader.Controls.Add(lblAppTitle);
             pnlHeader.Controls.Add(lblVersion);
 
-            // 2. Status Card (78px)
-            Panel pnlStatusCard = CreateCard(16, 78, 472, 74);
+            // 2. Карточка статуса службы (72px)
+            pnlStatusCard = CreateCard(16, 78, 482, 72);
 
             pnlStatusDot = new Panel
             {
@@ -159,14 +270,14 @@ namespace PasteImageAsFile
 
             lblStatusSub = new Label
             {
-                Font = new Font("Segoe UI", 8f),
-                ForeColor = Color.FromArgb(120, 120, 120),
+                Font = new Font("Segoe UI", 8.5f),
+                ForeColor = Color.FromArgb(150, 150, 150),
                 AutoSize = false,
-                Size = new Size(300, 32),
+                Size = new Size(310, 32),
                 Location = new Point(36, 38)
             };
 
-            btnToggleDaemon = CreateButton("Остановить", 354, 20, 102, 32);
+            btnToggleDaemon = CreateButton("Остановить", 364, 18, 102, 34);
             btnToggleDaemon.Click += BtnToggleDaemon_Click;
 
             pnlStatusCard.Controls.Add(pnlStatusDot);
@@ -174,98 +285,182 @@ namespace PasteImageAsFile
             pnlStatusCard.Controls.Add(lblStatusSub);
             pnlStatusCard.Controls.Add(btnToggleDaemon);
 
-            // 3. Install Card (74px)
-            pnlCardInstall = CreateCard(16, 158, 472, 70);
+            // 3. Карточка системной интеграции (72px)
+            pnlCardInstall = CreateCard(16, 158, 482, 72);
 
-            Label lblInstallTitle = new Label
+            lblInstallTitle = new Label
             {
                 Text = "Системная интеграция",
-                Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold),
+                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
                 AutoSize = true,
                 Location = new Point(16, 8)
             };
 
-            btnInstall = CreateButton("Установить", 16, 30, 214, 30);
+            lblInstallSub = new Label
+            {
+                Text = "Автозапуск и меню Проводника",
+                Font = new Font("Segoe UI", 8f),
+                ForeColor = Color.FromArgb(140, 140, 140),
+                AutoSize = true,
+                Location = new Point(16, 28)
+            };
+
+            btnInstall = CreateButton("Установить", 246, 18, 112, 34);
             btnInstall.Click += BtnInstall_Click;
 
-            btnUninstall = CreateButton("Удалить из системы", 242, 30, 214, 30);
+            btnUninstall = CreateButton("Удалить", 366, 18, 100, 34);
             btnUninstall.Click += BtnUninstall_Click;
 
             pnlCardInstall.Controls.Add(lblInstallTitle);
+            pnlCardInstall.Controls.Add(lblInstallSub);
             pnlCardInstall.Controls.Add(btnInstall);
             pnlCardInstall.Controls.Add(btnUninstall);
 
-            // 4. TabControl с настройками (390px)
-            tabSettings = new TabControl
+            // 4. Панель вкладок Fluent (без белых рамок WinForms TabControl)
+            pnlTabNav = new Panel
             {
-                Location = new Point(16, 234),
-                Size = new Size(472, 420),
-                Font = new Font("Segoe UI", 9f)
-            };
-
-            // --- Tab 1: Основные ---
-            tabGeneral = new TabPage("Основные") { Padding = new Padding(12) };
-            BuildGeneralTab();
-            tabSettings.TabPages.Add(tabGeneral);
-
-            // --- Tab 2: Буфер обмена ---
-            tabClipboard = new TabPage("Буфер обмена") { Padding = new Padding(12) };
-            BuildClipboardTab();
-            tabSettings.TabPages.Add(tabClipboard);
-
-            // --- Tab 3: SuperHub ---
-            tabSuperHub = new TabPage("SuperHub") { Padding = new Padding(12) };
-            BuildSuperHubTab();
-            tabSettings.TabPages.Add(tabSuperHub);
-
-            // 5. Footer (42px)
-            pnlFooter = new Panel
-            {
-                Location = new Point(16, 664),
-                Size = new Size(472, 42),
+                Location = new Point(16, 238),
+                Size = new Size(482, 34),
                 BackColor = Color.Transparent
             };
 
-            btnOpenCache = CreateButton("Папка кэша", 0, 4, 130, 32);
+            int tabX = 0;
+            for (int i = 0; i < tabTitles.Length; i++)
+            {
+                int idx = i;
+                Button btnTab = new Button
+                {
+                    Text = tabTitles[i],
+                    Location = new Point(tabX, 0),
+                    Size = new Size(idx == 1 ? 120 : (idx == 2 ? 100 : 96), 30),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.Transparent,
+                    ForeColor = (i == currentTabIndex) ? Color.White : Color.FromArgb(160, 160, 160),
+                    Font = new Font("Segoe UI", 9f, (i == currentTabIndex) ? FontStyle.Bold : FontStyle.Regular),
+                    Cursor = Cursors.Hand
+                };
+                btnTab.FlatAppearance.BorderSize = 0;
+                btnTab.Click += (s, e) => SwitchTab(idx);
+
+                navTabButtons.Add(btnTab);
+                pnlTabNav.Controls.Add(btnTab);
+                tabX += btnTab.Width + 6;
+            }
+
+            pnlTabNav.Paint += (s, e) => {
+                if (currentTabIndex >= 0 && currentTabIndex < navTabButtons.Count)
+                {
+                    Button act = navTabButtons[currentTabIndex];
+                    int barW = act.Width - 16;
+                    int barX = act.Left + 8;
+                    using (var b = new SolidBrush(ThemeHelper.Accent))
+                    using (var path = CreateRoundedPath(new Rectangle(barX, pnlTabNav.Height - 3, barW, 3), 1))
+                    {
+                        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                        e.Graphics.FillPath(b, path);
+                    }
+                }
+            };
+
+            // 5. Единая карточка настроек (Settings Card Container) - 380px
+            pnlSettingsCard = CreateCard(16, 274, 482, 380);
+
+            // Страница 1: Основные
+            pnlPageGeneral = new Panel
+            {
+                Location = new Point(4, 4),
+                Size = new Size(pnlSettingsCard.Width - 8, pnlSettingsCard.Height - 8),
+                BackColor = Color.Transparent
+            };
+            BuildGeneralPage();
+            pnlSettingsCard.Controls.Add(pnlPageGeneral);
+
+            // Страница 2: Буфер обмена
+            pnlPageClipboard = new Panel
+            {
+                Location = new Point(4, 4),
+                Size = new Size(pnlSettingsCard.Width - 8, pnlSettingsCard.Height - 8),
+                BackColor = Color.Transparent,
+                Visible = false
+            };
+            BuildClipboardPage();
+            pnlSettingsCard.Controls.Add(pnlPageClipboard);
+
+            // Страница 3: SuperHub
+            pnlPageSuperHub = new Panel
+            {
+                Location = new Point(4, 4),
+                Size = new Size(pnlSettingsCard.Width - 8, pnlSettingsCard.Height - 8),
+                BackColor = Color.Transparent,
+                Visible = false
+            };
+            BuildSuperHubPage();
+            pnlSettingsCard.Controls.Add(pnlPageSuperHub);
+
+            // 6. Подвал (Footer)
+            pnlFooter = new Panel
+            {
+                Location = new Point(16, 666),
+                Size = new Size(482, 42),
+                BackColor = Color.Transparent
+            };
+
+            btnOpenCache = CreateButton("Папка кэша", 0, 4, 130, 34);
             btnOpenCache.Click += (s, e) => {
                 string cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ShellIntegration.AppName, "Cache");
                 Directory.CreateDirectory(cache);
                 Process.Start("explorer.exe", cache);
             };
+            toolTip.SetToolTip(btnOpenCache, "Открыть папку с сохраненными снимками");
 
-            btnHideToTray = CreateButton("Свернуть в трей", 342, 4, 130, 32);
+            btnHideToTray = CreateButton("Свернуть в трей", 352, 4, 130, 34);
             btnHideToTray.Click += (s, e) => { this.Hide(); };
+            toolTip.SetToolTip(btnHideToTray, "Спрятать окно настроек в системный трей");
 
             pnlFooter.Controls.Add(btnOpenCache);
             pnlFooter.Controls.Add(btnHideToTray);
 
-            // Добавляем все элементы на форму
+            // Добавляем все основные компоненты
             this.Controls.Add(pnlHeader);
             this.Controls.Add(pnlStatusCard);
             this.Controls.Add(pnlCardInstall);
-            this.Controls.Add(tabSettings);
+            this.Controls.Add(pnlTabNav);
+            this.Controls.Add(pnlSettingsCard);
             this.Controls.Add(pnlFooter);
 
             this.ResumeLayout(false);
         }
 
-        private void BuildGeneralTab()
+        public void SwitchTab(int index)
+        {
+            currentTabIndex = index;
+            for (int i = 0; i < navTabButtons.Count; i++)
+            {
+                bool active = (i == currentTabIndex);
+                navTabButtons[i].Font = new Font("Segoe UI", 9f, active ? FontStyle.Bold : FontStyle.Regular);
+                navTabButtons[i].ForeColor = active ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary;
+            }
+            pnlTabNav.Invalidate();
+
+            pnlPageGeneral.Visible = (index == 0);
+            pnlPageClipboard.Visible = (index == 1);
+            pnlPageSuperHub.Visible = (index == 2);
+        }
+
+        private void BuildGeneralPage()
         {
             int top = 14;
-            int step = 28;
+            int step = 30;
 
+            // Тема оформления
             Label lblTheme = new Label
             {
                 Text = "Тема интерфейса:",
-                Location = new Point(12, top + 4),
+                Font = new Font("Segoe UI Semibold", 9f),
+                Location = new Point(14, top + 4),
                 AutoSize = true
             };
-            cmbTheme = new ComboBox
-            {
-                Location = new Point(220, top),
-                Size = new Size(210, 24),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
+            cmbTheme = CreateStyledComboBox(220, top, 230);
             cmbTheme.Items.AddRange(new object[] { "Системная (Windows)", "Темная тема", "Светлая тема" });
             cmbTheme.SelectedIndexChanged += (s, e) => {
                 if (cmbTheme.SelectedIndex == 1) Config.ThemeMode = "Dark";
@@ -273,146 +468,170 @@ namespace PasteImageAsFile
                 else Config.ThemeMode = "System";
                 ApplyTheme();
             };
-            tabGeneral.Controls.Add(lblTheme);
-            tabGeneral.Controls.Add(cmbTheme);
+            toolTip.SetToolTip(cmbTheme, "Выбор темы оформления (адаптируется к Windows 11)");
+            pnlPageGeneral.Controls.Add(lblTheme);
+            pnlPageGeneral.Controls.Add(cmbTheme);
 
             top += step + 8;
 
-            chkAutoRun = CreateCheckBox("Автозапуск вместе со стартом Windows", 12, top);
+            chkAutoRun = CreateCheckBox("Автозапуск вместе со стартом Windows", 14, top);
             chkAutoRun.CheckedChanged += (s, e) => { Config.AutoRun = chkAutoRun.Checked; ShellIntegration.SetAutoRun(chkAutoRun.Checked); };
-            tabGeneral.Controls.Add(chkAutoRun);
+            toolTip.SetToolTip(chkAutoRun, "Автоматически запускать службу при входе в систему");
+            pnlPageGeneral.Controls.Add(chkAutoRun);
             top += step;
 
-            chkContextMenu = CreateCheckBox("Контекстное меню в Проводнике", 12, top);
+            chkContextMenu = CreateCheckBox("Контекстное меню в Проводнике", 14, top);
             chkContextMenu.CheckedChanged += (s, e) => {
                 Config.ContextMenu = chkContextMenu.Checked;
                 chkShowHistoryMenu.Enabled = chkContextMenu.Checked;
                 ShellIntegration.SetContextMenu(chkContextMenu.Checked);
             };
-            tabGeneral.Controls.Add(chkContextMenu);
+            toolTip.SetToolTip(chkContextMenu, "Добавить пункт 'Вставить изображение из буфера' в Проводник");
+            pnlPageGeneral.Controls.Add(chkContextMenu);
             top += step;
 
-            chkClassicContextMenuWin11 = CreateCheckBox("Классическое контекстное меню Windows 11", 12, top);
+            chkClassicContextMenuWin11 = CreateCheckBox("Классическое контекстное меню Windows 11", 14, top);
             chkClassicContextMenuWin11.CheckedChanged += (s, e) => {
                 Config.ClassicContextMenuWin11 = chkClassicContextMenuWin11.Checked;
                 ShellIntegration.SetClassicContextMenuWin11(chkClassicContextMenuWin11.Checked);
             };
-            tabGeneral.Controls.Add(chkClassicContextMenuWin11);
+            toolTip.SetToolTip(chkClassicContextMenuWin11, "Открывать сразу полное классическое меню без пункта 'Показать дополнительные параметры'");
+            pnlPageGeneral.Controls.Add(chkClassicContextMenuWin11);
             top += step;
 
-            chkPlaceUnderCursor = CreateCheckBox("Размещать файл под курсором на Рабочем столе", 12, top);
+            chkPlaceUnderCursor = CreateCheckBox("Размещать файл под курсором на Рабочем столе", 14, top);
             chkPlaceUnderCursor.CheckedChanged += (s, e) => { Config.PlaceUnderCursor = chkPlaceUnderCursor.Checked; };
-            tabGeneral.Controls.Add(chkPlaceUnderCursor);
+            toolTip.SetToolTip(chkPlaceUnderCursor, "При нажатии Ctrl+V на Рабочем столе значок созданного файла помещается точно под стрелку мыши");
+            pnlPageGeneral.Controls.Add(chkPlaceUnderCursor);
             top += step;
 
-            chkExtractOriginalName = CreateCheckBox("Извлекать имя картинки везде где возможно", 12, top);
+            chkExtractOriginalName = CreateCheckBox("Извлекать имя картинки везде где возможно", 14, top);
             chkExtractOriginalName.CheckedChanged += (s, e) => { Config.ExtractOriginalName = chkExtractOriginalName.Checked; };
-            tabGeneral.Controls.Add(chkExtractOriginalName);
-            top += step + 4;
+            toolTip.SetToolTip(chkExtractOriginalName, "Автоматически находить понятное имя файла из HTML-разметки или окна источника");
+            pnlPageGeneral.Controls.Add(chkExtractOriginalName);
+            top += step + 8;
 
             lblPrefix = new Label
             {
                 Text = "Префикс файлов по умолчанию:",
-                Location = new Point(12, top + 4),
+                Font = new Font("Segoe UI Semibold", 9f),
+                Location = new Point(14, top + 4),
                 AutoSize = true
             };
-            txtPrefix = new TextBox
-            {
-                Location = new Point(220, top),
-                Size = new Size(210, 24),
-                BorderStyle = BorderStyle.FixedSingle
-            };
+            txtPrefix = CreateStyledTextBox(220, top, 230);
             txtPrefix.TextChanged += (s, e) => { Config.DefaultPrefix = txtPrefix.Text.Trim(); };
-            tabGeneral.Controls.Add(lblPrefix);
-            tabGeneral.Controls.Add(txtPrefix);
+            toolTip.SetToolTip(txtPrefix, "Базовое имя файла, если оригинальное имя не удалось распознать (например, Снимок)");
+            pnlPageGeneral.Controls.Add(lblPrefix);
+            pnlPageGeneral.Controls.Add(txtPrefix);
         }
 
-        private void BuildClipboardTab()
-        {
-            int top = 14;
-            int step = 28;
-
-            Label lblAction = new Label
-            {
-                Text = "Действие по клику на карточку:",
-                Location = new Point(12, top + 4),
-                AutoSize = true
-            };
-            cmbClipboardClickAction = new ComboBox
-            {
-                Location = new Point(220, top),
-                Size = new Size(210, 24),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-            cmbClipboardClickAction.Items.AddRange(new object[] { "Вставить в активное окно [Ctrl+V]", "Только скопировать в буфер" });
-            cmbClipboardClickAction.SelectedIndexChanged += (s, e) => {
-                Config.ClipboardClickAction = (cmbClipboardClickAction.SelectedIndex == 1) ? "Copy" : "Paste";
-            };
-            tabClipboard.Controls.Add(lblAction);
-            tabClipboard.Controls.Add(cmbClipboardClickAction);
-
-            top += step + 8;
-
-            chkTrayClickOpensClipboard = CreateCheckBox("Клик по иконке в трее открывает буфер обмена", 12, top);
-            chkTrayClickOpensClipboard.CheckedChanged += (s, e) => {
-                Config.TrayClickOpensClipboard = chkTrayClickOpensClipboard.Checked;
-            };
-            tabClipboard.Controls.Add(chkTrayClickOpensClipboard);
-            top += step;
-
-            chkShowHistoryMenu = CreateCheckBox("Пункт \"Буфер обмена\" в контекстном меню", 12, top);
-            chkShowHistoryMenu.CheckedChanged += (s, e) => {
-                Config.ShowHistoryMenu = chkShowHistoryMenu.Checked;
-                ShellIntegration.SetHistoryMenuItem(chkShowHistoryMenu.Checked);
-            };
-            tabClipboard.Controls.Add(chkShowHistoryMenu);
-            top += step;
-
-            chkHistoryRememberText = CreateCheckBox("Запоминать скопированный текст", 12, top);
-            chkHistoryRememberText.CheckedChanged += (s, e) => { Config.HistoryRememberText = chkHistoryRememberText.Checked; };
-            tabClipboard.Controls.Add(chkHistoryRememberText);
-            top += step;
-
-            chkHistoryRememberFiles = CreateCheckBox("Запоминать скопированные файлы и папки", 12, top);
-            chkHistoryRememberFiles.CheckedChanged += (s, e) => { Config.HistoryRememberFiles = chkHistoryRememberFiles.Checked; };
-            tabClipboard.Controls.Add(chkHistoryRememberFiles);
-            top += step + 8;
-
-            Label lblHint = new Label
-            {
-                Text = "💡 Подсказка:\n• Двойной клик по картинке или файлу в буфере открывает его.\n• При перетаскивании карточки на Рабочий стол создается копия файла.",
-                Location = new Point(12, top),
-                Size = new Size(420, 50),
-                ForeColor = Color.FromArgb(120, 120, 120)
-            };
-            tabClipboard.Controls.Add(lblHint);
-        }
-
-        private void BuildSuperHubTab()
+        private void BuildClipboardPage()
         {
             int top = 14;
             int step = 32;
 
-            chkSuperHubEnabled = CreateCheckBox("Включить плавающую полку SuperHub у края экрана", 12, top);
+            Label lblAction = new Label
+            {
+                Text = "Действие по клику на карточку:",
+                Font = new Font("Segoe UI Semibold", 9f),
+                Location = new Point(14, top + 4),
+                AutoSize = true
+            };
+            cmbClipboardClickAction = CreateStyledComboBox(220, top, 230);
+            cmbClipboardClickAction.Items.AddRange(new object[] { "Вставить сразу [Ctrl+V]", "Только скопировать в буфер" });
+            cmbClipboardClickAction.SelectedIndexChanged += (s, e) => {
+                Config.ClipboardClickAction = (cmbClipboardClickAction.SelectedIndex == 1) ? "Copy" : "Paste";
+            };
+            toolTip.SetToolTip(cmbClipboardClickAction, "Что делать при одиночном клике по карточке в журнале буфера обмена");
+            pnlPageClipboard.Controls.Add(lblAction);
+            pnlPageClipboard.Controls.Add(cmbClipboardClickAction);
+
+            top += step + 8;
+
+            chkTrayClickOpensClipboard = CreateCheckBox("Клик по значку в трее открывает буфер обмена", 14, top);
+            chkTrayClickOpensClipboard.CheckedChanged += (s, e) => {
+                Config.TrayClickOpensClipboard = chkTrayClickOpensClipboard.Checked;
+            };
+            toolTip.SetToolTip(chkTrayClickOpensClipboard, "При нажатии левой кнопкой на иконку у часов открывать всплывающий буфер вместо окна настроек");
+            pnlPageClipboard.Controls.Add(chkTrayClickOpensClipboard);
+            top += step;
+
+            chkShowHistoryMenu = CreateCheckBox("Пункт \"Буфер обмена\" в контекстном меню", 14, top);
+            chkShowHistoryMenu.CheckedChanged += (s, e) => {
+                Config.ShowHistoryMenu = chkShowHistoryMenu.Checked;
+                ShellIntegration.SetHistoryMenuItem(chkShowHistoryMenu.Checked);
+            };
+            toolTip.SetToolTip(chkShowHistoryMenu, "Показывать вызов журнала буфера в контекстном меню Проводника");
+            pnlPageClipboard.Controls.Add(chkShowHistoryMenu);
+            top += step;
+
+            chkHistoryRememberText = CreateCheckBox("Запоминать скопированный текст", 14, top);
+            chkHistoryRememberText.CheckedChanged += (s, e) => { Config.HistoryRememberText = chkHistoryRememberText.Checked; };
+            toolTip.SetToolTip(chkHistoryRememberText, "Вести историю скопированных фрагментов текста с возможностью быстрого поиска");
+            pnlPageClipboard.Controls.Add(chkHistoryRememberText);
+            top += step;
+
+            chkHistoryRememberFiles = CreateCheckBox("Запоминать скопированные файлы и папки", 14, top);
+            chkHistoryRememberFiles.CheckedChanged += (s, e) => { Config.HistoryRememberFiles = chkHistoryRememberFiles.Checked; };
+            toolTip.SetToolTip(chkHistoryRememberFiles, "Вести историю скопированных путей к файлам с отображением системных иконок");
+            pnlPageClipboard.Controls.Add(chkHistoryRememberFiles);
+            top += step + 12;
+
+            Panel pnlClipboardHelp = new Panel
+            {
+                Location = new Point(14, top),
+                Size = new Size(440, 76),
+                BackColor = Color.Transparent
+            };
+            pnlClipboardHelp.Paint += (s, e) => {
+                using (var pen = new Pen(ThemeHelper.CardBorder, 1))
+                {
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    Rectangle rect = new Rectangle(0, 0, pnlClipboardHelp.Width - 1, pnlClipboardHelp.Height - 1);
+                    using (var path = CreateRoundedPath(rect, 4))
+                    {
+                        e.Graphics.DrawPath(pen, path);
+                    }
+                }
+            };
+
+            Label lblHint = new Label
+            {
+                Text = "Советы по использованию:\n" +
+                       "- Двойной клик по карточке запускает файл или ссылку.\n" +
+                       "- Перетаскивание карточки наружу копирует файл в папку.\n" +
+                       "- Кнопка в шапке меняет режим: [Вставлять] или [Копировать].",
+                Location = new Point(10, 8),
+                Size = new Size(430, 65),
+                Font = new Font("Segoe UI", 8.5f),
+                ForeColor = ThemeHelper.TextSecondary
+            };
+            pnlClipboardHelp.Controls.Add(lblHint);
+            pnlPageClipboard.Controls.Add(pnlClipboardHelp);
+        }
+
+        private void BuildSuperHubPage()
+        {
+            int top = 14;
+            int step = 32;
+
+            chkSuperHubEnabled = CreateCheckBox("Включить плавающую полку SuperHub у края экрана", 14, top);
             chkSuperHubEnabled.CheckedChanged += (s, e) => {
                 Config.SuperHubEnabled = chkSuperHubEnabled.Checked;
                 SuperHubDockForm.Instance.PositionCollapsed();
             };
-            tabSuperHub.Controls.Add(chkSuperHubEnabled);
+            toolTip.SetToolTip(chkSuperHubEnabled, "Выдвижная полка для временного накопления и переноса файлов между программами");
+            pnlPageSuperHub.Controls.Add(chkSuperHubEnabled);
             top += step;
 
             Label lblPos = new Label
             {
                 Text = "Расположение полки на экране:",
-                Location = new Point(12, top + 4),
+                Font = new Font("Segoe UI Semibold", 9f),
+                Location = new Point(14, top + 4),
                 AutoSize = true
             };
-            cmbSuperHubPosition = new ComboBox
-            {
-                Location = new Point(220, top),
-                Size = new Size(210, 24),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
+            cmbSuperHubPosition = CreateStyledComboBox(220, top, 230);
             cmbSuperHubPosition.Items.AddRange(new object[] {
                 "Справа по центру",
                 "Справа вверху",
@@ -433,22 +652,19 @@ namespace PasteImageAsFile
                 }
                 SuperHubDockForm.Instance.PositionCollapsed();
             };
-            tabSuperHub.Controls.Add(lblPos);
-            tabSuperHub.Controls.Add(cmbSuperHubPosition);
+            toolTip.SetToolTip(cmbSuperHubPosition, "К какому краю или углу монитора прикреплять выдвижную полку SuperHub");
+            pnlPageSuperHub.Controls.Add(lblPos);
+            pnlPageSuperHub.Controls.Add(cmbSuperHubPosition);
             top += step;
 
             Label lblDrag = new Label
             {
                 Text = "Перетаскивание файлов наружу:",
-                Location = new Point(12, top + 4),
+                Font = new Font("Segoe UI Semibold", 9f),
+                Location = new Point(14, top + 4),
                 AutoSize = true
             };
-            cmbSuperHubDragMode = new ComboBox
-            {
-                Location = new Point(220, top),
-                Size = new Size(210, 24),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
+            cmbSuperHubDragMode = CreateStyledComboBox(220, top, 230);
             cmbSuperHubDragMode.Items.AddRange(new object[] {
                 "Копировать файлы (безопасно)",
                 "Перемещать файлы (вырезать)"
@@ -457,75 +673,220 @@ namespace PasteImageAsFile
                 Config.SuperHubDragMode = (cmbSuperHubDragMode.SelectedIndex == 1) ? "Move" : "Copy";
                 SuperHubDockForm.Instance.RefreshItems();
             };
-            tabSuperHub.Controls.Add(lblDrag);
-            tabSuperHub.Controls.Add(cmbSuperHubDragMode);
+            toolTip.SetToolTip(cmbSuperHubDragMode, "В режиме Копирования файлы всегда остаются на своих местах. В режиме Перемещения они вырезаются.");
+            pnlPageSuperHub.Controls.Add(lblDrag);
+            pnlPageSuperHub.Controls.Add(cmbSuperHubDragMode);
             top += step;
 
             Label lblSens = new Label
             {
-                Text = "Чувствительность у края (пикс):",
-                Location = new Point(12, top + 4),
+                Text = "Чувствительность у края:",
+                Font = new Font("Segoe UI Semibold", 9f),
+                Location = new Point(14, top + 4),
                 AutoSize = true
             };
-            numSuperHubSens = new NumericUpDown
-            {
-                Location = new Point(220, top),
-                Size = new Size(80, 24),
-                Minimum = 20,
-                Maximum = 150,
-                Value = 60
-            };
-            numSuperHubSens.ValueChanged += (s, e) => {
-                Config.SuperHubSensitivity = (int)numSuperHubSens.Value;
-            };
-            tabSuperHub.Controls.Add(lblSens);
-            tabSuperHub.Controls.Add(numSuperHubSens);
-            top += step + 8;
 
-            btnTestSuperHub = CreateButton("Раскрыть полку SuperHub сейчас", 12, top, 240, 32);
+            cmbSuperHubSens = CreateStyledComboBox(220, top, 230);
+            cmbSuperHubSens.Items.AddRange(new object[] {
+                "30 пикс (Узкая зона)",
+                "60 пикс (Стандартная зона)",
+                "90 пикс (Широкая зона)",
+                "120 пикс (Очень широкая зона)"
+            });
+            cmbSuperHubSens.SelectedIndexChanged += (s, e) => {
+                switch (cmbSuperHubSens.SelectedIndex)
+                {
+                    case 0: Config.SuperHubSensitivity = 30; break;
+                    case 1: Config.SuperHubSensitivity = 60; break;
+                    case 2: Config.SuperHubSensitivity = 90; break;
+                    case 3: Config.SuperHubSensitivity = 120; break;
+                    default: Config.SuperHubSensitivity = 60; break;
+                }
+            };
+            toolTip.SetToolTip(cmbSuperHubSens, "Ширина зоны приближения курсора к краю экрана для автоматического выдвижения полки");
+            pnlPageSuperHub.Controls.Add(lblSens);
+            pnlPageSuperHub.Controls.Add(cmbSuperHubSens);
+            top += step + 6;
+
+            btnTestSuperHub = CreateButton("Раскрыть полку SuperHub сейчас", 14, top, 240, 32);
             btnTestSuperHub.Click += (s, e) => {
                 SuperHubDockForm.Instance.ExpandShelf();
             };
-            tabSuperHub.Controls.Add(btnTestSuperHub);
-            top += step + 8;
+            toolTip.SetToolTip(btnTestSuperHub, "Немедленно показать полку SuperHub для проверки");
+            pnlPageSuperHub.Controls.Add(btnTestSuperHub);
+            top += step + 10;
+
+            Panel pnlSuperHelp = new Panel
+            {
+                Location = new Point(14, top),
+                Size = new Size(440, 96),
+                BackColor = Color.Transparent
+            };
+            pnlSuperHelp.Paint += (s, e) => {
+                using (var pen = new Pen(ThemeHelper.CardBorder, 1))
+                {
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    Rectangle rect = new Rectangle(0, 0, pnlSuperHelp.Width - 1, pnlSuperHelp.Height - 1);
+                    using (var path = CreateRoundedPath(rect, 4))
+                    {
+                        e.Graphics.DrawPath(pen, path);
+                    }
+                }
+            };
 
             Label lblSuperHint = new Label
             {
-                Text = "💡 Возможности SuperHub:\n" +
-                       "• Автоматически выдвигается при зажатой левой кнопке мыши у края экрана.\n" +
-                       "• Перетащите любые файлы, картинки или текст прямо на полку.\n" +
-                       "• Кнопка [📦] в шапке позволяет за раз вытащить все накопленные файлы.\n" +
-                       "• Переключатель [📋 Копия]/[✂️ Перенос] доступен прямо в шапке полки.",
-                Location = new Point(12, top),
-                Size = new Size(440, 85),
-                ForeColor = Color.FromArgb(120, 120, 120)
+                Text = "Возможности полки SuperHub:\n" +
+                       "- Выдвигается при зажатой левой кнопке мыши у края экрана.\n" +
+                       "- Принимает перетаскиваемые файлы, папки и любой текст.\n" +
+                       "- Кнопка 'Выгрузить все' копирует все элементы за один жест.\n" +
+                       "- Режим перетаскивания [Копия]/[Перенос] переключается в шапке.",
+                Location = new Point(10, 8),
+                Size = new Size(420, 80),
+                Font = new Font("Segoe UI", 8.5f),
+                ForeColor = ThemeHelper.TextSecondary
             };
-            tabSuperHub.Controls.Add(lblSuperHint);
+            pnlSuperHelp.Controls.Add(lblSuperHint);
+            pnlPageSuperHub.Controls.Add(pnlSuperHelp);
+        }
+
+        private FluentComboBox CreateStyledComboBox(int x, int y, int w)
+        {
+            var cmb = new FluentComboBox
+            {
+                Location = new Point(x, y),
+                Size = new Size(w, 26)
+            };
+
+            cmb.DrawItem += (s, e) => {
+                if (e.Index < 0) return;
+                bool isDark = ThemeHelper.IsDarkTheme();
+                bool isSelected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+
+                Color bg = isSelected
+                    ? (isDark ? Color.FromArgb(0, 103, 192) : Color.FromArgb(204, 232, 255))
+                    : (isDark ? Color.FromArgb(43, 43, 43) : Color.FromArgb(255, 255, 255));
+                Color fg = isSelected
+                    ? Color.White
+                    : (isDark ? Color.FromArgb(240, 240, 240) : Color.FromArgb(25, 25, 25));
+
+                using (var brush = new SolidBrush(bg))
+                {
+                    e.Graphics.FillRectangle(brush, e.Bounds);
+                }
+
+                string text = cmb.Items[e.Index].ToString();
+                using (var font = new Font("Segoe UI", 9f))
+                using (var textBrush = new SolidBrush(fg))
+                {
+                    e.Graphics.DrawString(text, font, textBrush, e.Bounds.X + 8, e.Bounds.Y + 3);
+                }
+            };
+
+            return cmb;
+        }
+
+        private TextBox CreateStyledTextBox(int x, int y, int w)
+        {
+            TextBox txt = new TextBox
+            {
+                Location = new Point(x, y),
+                Size = new Size(w, 24),
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 9.5f)
+            };
+            return txt;
         }
 
         private void ApplyTheme()
         {
-            bool dark = ThemeHelper.IsDarkTheme();
+            bool isDark = ThemeHelper.IsDarkTheme();
             Color bg = ThemeHelper.Background;
             Color text = ThemeHelper.TextPrimary;
+            Color secText = ThemeHelper.TextSecondary;
             Color headerBg = ThemeHelper.HeaderBackground;
             Color cardBg = ThemeHelper.CardBackground;
+            Color inputBg = isDark ? Color.FromArgb(43, 43, 43) : Color.FromArgb(255, 255, 255);
 
             this.BackColor = bg;
             this.ForeColor = text;
 
             pnlHeader.BackColor = headerBg;
             lblAppTitle.ForeColor = text;
+            lblVersion.ForeColor = secText;
 
-            tabSettings.BackColor = bg;
-            tabGeneral.BackColor = cardBg;
-            tabGeneral.ForeColor = text;
-            tabClipboard.BackColor = cardBg;
-            tabClipboard.ForeColor = text;
-            tabSuperHub.BackColor = cardBg;
-            tabSuperHub.ForeColor = text;
+            // Стилизация карточек
+            pnlStatusCard.BackColor = cardBg;
+            lblStatus.ForeColor = text;
+            lblStatusSub.ForeColor = secText;
+
+            pnlCardInstall.BackColor = cardBg;
+            lblInstallTitle.ForeColor = text;
+            lblInstallSub.ForeColor = secText;
+
+            pnlSettingsCard.BackColor = cardBg;
+
+            // Навигационные кнопки
+            for (int i = 0; i < navTabButtons.Count; i++)
+            {
+                bool active = (i == currentTabIndex);
+                navTabButtons[i].ForeColor = active ? text : secText;
+            }
+            pnlTabNav.Invalidate();
+
+            // Поля ввода
+            if (cmbTheme != null)
+            {
+                cmbTheme.BackColor = inputBg;
+                cmbTheme.ForeColor = text;
+            }
+            if (cmbClipboardClickAction != null)
+            {
+                cmbClipboardClickAction.BackColor = inputBg;
+                cmbClipboardClickAction.ForeColor = text;
+            }
+            if (cmbSuperHubPosition != null)
+            {
+                cmbSuperHubPosition.BackColor = inputBg;
+                cmbSuperHubPosition.ForeColor = text;
+            }
+            if (cmbSuperHubDragMode != null)
+            {
+                cmbSuperHubDragMode.BackColor = inputBg;
+                cmbSuperHubDragMode.ForeColor = text;
+            }
+            if (txtPrefix != null)
+            {
+                txtPrefix.BackColor = inputBg;
+                txtPrefix.ForeColor = text;
+            }
+            if (cmbSuperHubSens != null)
+            {
+                cmbSuperHubSens.BackColor = inputBg;
+                cmbSuperHubSens.ForeColor = text;
+            }
+
+            // Чекбоксы
+            ApplyCheckTheme(chkAutoRun);
+            ApplyCheckTheme(chkContextMenu);
+            ApplyCheckTheme(chkClassicContextMenuWin11);
+            ApplyCheckTheme(chkPlaceUnderCursor);
+            ApplyCheckTheme(chkExtractOriginalName);
+            ApplyCheckTheme(chkTrayClickOpensClipboard);
+            ApplyCheckTheme(chkShowHistoryMenu);
+            ApplyCheckTheme(chkHistoryRememberText);
+            ApplyCheckTheme(chkHistoryRememberFiles);
+            ApplyCheckTheme(chkSuperHubEnabled);
 
             this.Invalidate(true);
+        }
+
+        private void ApplyCheckTheme(CheckBox chk)
+        {
+            if (chk != null)
+            {
+                chk.ForeColor = ThemeHelper.TextPrimary;
+            }
         }
 
         private Panel CreateCard(int x, int y, int w, int h)
@@ -541,7 +902,10 @@ namespace PasteImageAsFile
                 {
                     e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                     Rectangle rect = new Rectangle(0, 0, card.Width - 1, card.Height - 1);
-                    DrawRoundedRect(e.Graphics, pen, rect, 6);
+                    using (var path = CreateRoundedPath(rect, 6))
+                    {
+                        e.Graphics.DrawPath(pen, path);
+                    }
                 }
             };
             return card;
@@ -593,23 +957,16 @@ namespace PasteImageAsFile
             };
         }
 
-        private void DrawRoundedRect(Graphics g, Pen pen, Rectangle rect, int radius)
+        private static GraphicsPath CreateRoundedPath(Rectangle rect, int radius)
         {
-            using (GraphicsPath path = new GraphicsPath())
-            {
-                int d = radius * 2;
-                path.AddArc(rect.X, rect.Y, d, d, 180, 90);
-                path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
-                path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
-                path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
-                path.CloseFigure();
-
-                using (SolidBrush fill = new SolidBrush(ThemeHelper.CardBackground))
-                {
-                    g.FillPath(fill, path);
-                }
-                g.DrawPath(pen, path);
-            }
+            GraphicsPath path = new GraphicsPath();
+            int d = radius * 2;
+            path.AddArc(rect.X, rect.Y, d, d, 180, 90);
+            path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
+            path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+            path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
         }
 
         private void LoadConfigToUi()
@@ -649,7 +1006,11 @@ namespace PasteImageAsFile
             bool isMove = string.Equals(Config.SuperHubDragMode, "Move", StringComparison.OrdinalIgnoreCase);
             cmbSuperHubDragMode.SelectedIndex = isMove ? 1 : 0;
 
-            numSuperHubSens.Value = Math.Max(20, Math.Min(150, Config.SuperHubSensitivity));
+            int sens = Config.SuperHubSensitivity;
+            if (sens <= 40) cmbSuperHubSens.SelectedIndex = 0;
+            else if (sens <= 75) cmbSuperHubSens.SelectedIndex = 1;
+            else if (sens <= 105) cmbSuperHubSens.SelectedIndex = 2;
+            else cmbSuperHubSens.SelectedIndex = 3;
         }
 
         public void UpdateStatus()
@@ -661,7 +1022,7 @@ namespace PasteImageAsFile
                 pnlStatusDot.BackColor = Color.FromArgb(46, 160, 67);
                 lblStatus.Text = "Служба активна";
                 lblStatus.ForeColor = Color.FromArgb(46, 160, 67);
-                lblStatusSub.Text = "Вставка Ctrl+V в Проводнике и SuperHub работают";
+                lblStatusSub.Text = "Вставка Ctrl+V в Проводнике и полка SuperHub работают";
                 btnToggleDaemon.Text = "Остановить";
             }
             else
@@ -675,18 +1036,23 @@ namespace PasteImageAsFile
             pnlStatusDot.Invalidate();
 
             bool installed = ShellIntegration.IsInstalled;
-            btnInstall.Enabled = !installed;
             btnUninstall.Enabled = installed;
 
             if (installed)
             {
-                btnInstall.BackColor = ThemeHelper.ButtonHover;
-                btnInstall.ForeColor = ThemeHelper.TextSecondary;
+                btnInstall.Text = "✓ Установлено";
+                btnInstall.BackColor = Color.FromArgb(28, 52, 34);
+                btnInstall.ForeColor = Color.FromArgb(100, 225, 135);
+                btnInstall.FlatAppearance.BorderColor = Color.FromArgb(45, 110, 55);
+                btnInstall.Cursor = Cursors.Default;
             }
             else
             {
+                btnInstall.Text = "Установить";
                 btnInstall.BackColor = ThemeHelper.Accent;
                 btnInstall.ForeColor = Color.White;
+                btnInstall.FlatAppearance.BorderColor = ThemeHelper.Accent;
+                btnInstall.Cursor = Cursors.Hand;
             }
         }
 
@@ -706,6 +1072,17 @@ namespace PasteImageAsFile
 
         private void BtnInstall_Click(object sender, EventArgs e)
         {
+            if (ShellIntegration.IsInstalled)
+            {
+                MessageBox.Show(
+                    "Утилита уже интегрирована в систему.\n\nДля переустановки или сброса сначала нажмите 'Удалить'.",
+                    "PasteImageAsFile",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+                return;
+            }
+
             ShellIntegration.Install(chkAutoRun.Checked, chkContextMenu.Checked);
             Program.StartWatcher();
             MessageBox.Show(
