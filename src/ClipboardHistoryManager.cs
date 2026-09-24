@@ -54,6 +54,18 @@ namespace PasteImageAsFile
         private List<ClipboardItem> items = new List<ClipboardItem>();
         private string historyFilePath;
 
+        public event Action HistoryChanged;
+
+        private void NotifyChanged()
+        {
+            try
+            {
+                var handler = HistoryChanged;
+                if (handler != null) handler();
+            }
+            catch {}
+        }
+
         public static ClipboardHistoryManager Instance
         {
             get
@@ -457,6 +469,7 @@ namespace PasteImageAsFile
                 File.WriteAllText(tmp, sb.ToString(), Encoding.UTF8);
                 if (File.Exists(historyFilePath)) File.Delete(historyFilePath);
                 File.Move(tmp, historyFilePath);
+                NotifyChanged();
             }
             catch {}
         }

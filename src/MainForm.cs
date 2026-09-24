@@ -170,6 +170,8 @@ namespace PasteImageAsFile
 
         // Элементы страницы "SuperHub"
         private CheckBox chkSuperHubEnabled;
+        private FluentComboBox cmbSuperHubViewMode;
+        private FluentComboBox cmbSuperHubSize;
         private FluentComboBox cmbSuperHubPosition;
         private FluentComboBox cmbSuperHubDragMode;
         private FluentComboBox cmbSuperHubSens;
@@ -635,8 +637,8 @@ namespace PasteImageAsFile
 
         private void BuildSuperHubPage()
         {
-            int top = 14;
-            int step = 32;
+            int top = 10;
+            int step = 28;
 
             chkSuperHubEnabled = CreateCheckBox("Включить плавающую полку SuperHub у края экрана", 14, top);
             chkSuperHubEnabled.CheckedChanged += (s, e) => {
@@ -647,11 +649,76 @@ namespace PasteImageAsFile
             pnlPageSuperHub.Controls.Add(chkSuperHubEnabled);
             top += step;
 
+            // 1. Режим полки (Все табы vs Только SuperHub)
+            Label lblMode = new Label
+            {
+                Text = "Режим выдвижной полки:",
+                Font = new Font("Segoe UI Semibold", 9f),
+                Location = new Point(14, top + 3),
+                AutoSize = true
+            };
+            cmbSuperHubViewMode = CreateStyledComboBox(220, top, 230);
+            cmbSuperHubViewMode.Items.AddRange(new object[] {
+                "Буфер обмена и SuperHub (с вкладками)",
+                "Только полка SuperHub (минималистичный)"
+            });
+            cmbSuperHubViewMode.SelectedIndexChanged += (s, e) => {
+                Config.SuperHubViewMode = (cmbSuperHubViewMode.SelectedIndex == 1) ? "OnlyHub" : "Tabs";
+                SuperHubDockForm.Instance.RefreshItems();
+            };
+            toolTip.SetToolTip(cmbSuperHubViewMode, "Выбор режима: отображать вкладки всех категорий буфера обмена или только файлы полки SuperHub");
+            pnlPageSuperHub.Controls.Add(lblMode);
+            pnlPageSuperHub.Controls.Add(cmbSuperHubViewMode);
+            top += step;
+
+            // 2. Размер полки
+            Label lblSize = new Label
+            {
+                Text = "Размер выдвижной полки:",
+                Font = new Font("Segoe UI Semibold", 9f),
+                Location = new Point(14, top + 3),
+                AutoSize = true
+            };
+            cmbSuperHubSize = CreateStyledComboBox(220, top, 230);
+            cmbSuperHubSize.Items.AddRange(new object[] {
+                "Компактный (280 × 420)",
+                "Стандартный (340 × 500)",
+                "Большой (420 × 620)",
+                "Широкий (500 × 700)"
+            });
+            cmbSuperHubSize.SelectedIndexChanged += (s, e) => {
+                switch (cmbSuperHubSize.SelectedIndex)
+                {
+                    case 0:
+                        Config.SuperHubWidthVertical = 280; Config.SuperHubHeightVertical = 420;
+                        Config.SuperHubWidthHorizontal = 520; Config.SuperHubHeightHorizontal = 190;
+                        break;
+                    case 1:
+                        Config.SuperHubWidthVertical = 340; Config.SuperHubHeightVertical = 500;
+                        Config.SuperHubWidthHorizontal = 620; Config.SuperHubHeightHorizontal = 220;
+                        break;
+                    case 2:
+                        Config.SuperHubWidthVertical = 420; Config.SuperHubHeightVertical = 620;
+                        Config.SuperHubWidthHorizontal = 750; Config.SuperHubHeightHorizontal = 260;
+                        break;
+                    case 3:
+                        Config.SuperHubWidthVertical = 500; Config.SuperHubHeightVertical = 700;
+                        Config.SuperHubWidthHorizontal = 900; Config.SuperHubHeightHorizontal = 300;
+                        break;
+                }
+                SuperHubDockForm.Instance.PositionCollapsed();
+            };
+            toolTip.SetToolTip(cmbSuperHubSize, "Базовый размер полки. Вы также можете свободно изменять размер перетаскиванием краев окна мышью.");
+            pnlPageSuperHub.Controls.Add(lblSize);
+            pnlPageSuperHub.Controls.Add(cmbSuperHubSize);
+            top += step;
+
+            // 3. Расположение на экране
             Label lblPos = new Label
             {
-                Text = "Расположение полки на экране:",
+                Text = "Расположение на экране:",
                 Font = new Font("Segoe UI Semibold", 9f),
-                Location = new Point(14, top + 4),
+                Location = new Point(14, top + 3),
                 AutoSize = true
             };
             cmbSuperHubPosition = CreateStyledComboBox(220, top, 230);
@@ -684,11 +751,12 @@ namespace PasteImageAsFile
             pnlPageSuperHub.Controls.Add(cmbSuperHubPosition);
             top += step;
 
+            // 4. Режим переноса файлов
             Label lblDrag = new Label
             {
                 Text = "Перетаскивание файлов наружу:",
                 Font = new Font("Segoe UI Semibold", 9f),
-                Location = new Point(14, top + 4),
+                Location = new Point(14, top + 3),
                 AutoSize = true
             };
             cmbSuperHubDragMode = CreateStyledComboBox(220, top, 230);
@@ -705,14 +773,14 @@ namespace PasteImageAsFile
             pnlPageSuperHub.Controls.Add(cmbSuperHubDragMode);
             top += step;
 
+            // 5. Чувствительность у края
             Label lblSens = new Label
             {
                 Text = "Чувствительность у края:",
                 Font = new Font("Segoe UI Semibold", 9f),
-                Location = new Point(14, top + 4),
+                Location = new Point(14, top + 3),
                 AutoSize = true
             };
-
             cmbSuperHubSens = CreateStyledComboBox(220, top, 230);
             cmbSuperHubSens.Items.AddRange(new object[] {
                 "30 пикс (Узкая зона)",
@@ -733,20 +801,20 @@ namespace PasteImageAsFile
             toolTip.SetToolTip(cmbSuperHubSens, "Ширина зоны приближения курсора к краю экрана для автоматического выдвижения полки");
             pnlPageSuperHub.Controls.Add(lblSens);
             pnlPageSuperHub.Controls.Add(cmbSuperHubSens);
-            top += step + 6;
+            top += step + 4;
 
-            btnTestSuperHub = CreateButton("Раскрыть полку SuperHub сейчас", 14, top, 240, 32);
+            btnTestSuperHub = CreateButton("Раскрыть полку SuperHub сейчас", 14, top, 240, 28);
             btnTestSuperHub.Click += (s, e) => {
                 SuperHubDockForm.Instance.ExpandShelf();
             };
             toolTip.SetToolTip(btnTestSuperHub, "Немедленно показать полку SuperHub для проверки");
             pnlPageSuperHub.Controls.Add(btnTestSuperHub);
-            top += step + 10;
+            top += 34;
 
             Panel pnlSuperHelp = new Panel
             {
                 Location = new Point(14, top),
-                Size = new Size(440, 96),
+                Size = new Size(440, 78),
                 BackColor = Color.Transparent
             };
             pnlSuperHelp.Paint += (s, e) => {
@@ -764,12 +832,11 @@ namespace PasteImageAsFile
             Label lblSuperHint = new Label
             {
                 Text = "Возможности полки SuperHub:\n" +
-                       "- Выдвигается при зажатой левой кнопке мыши у края экрана.\n" +
-                       "- Принимает перетаскиваемые файлы, папки и любой текст.\n" +
-                       "- Кнопка 'Выгрузить все' копирует все элементы за один жест.\n" +
-                       "- Режим перетаскивания [Копия]/[Перенос] переключается в шапке.",
+                       "- Выдвигается при наведении курсора на ярлычок у края экрана.\n" +
+                       "- Принимает файлы, папки и текст; поддерживает ресайз за края окна.\n" +
+                       "- Режим с вкладками объединяет журнал буфера обмена и полку SuperHub.",
                 Location = new Point(10, 8),
-                Size = new Size(420, 80),
+                Size = new Size(420, 64),
                 Font = new Font("Segoe UI", 8.5f),
                 ForeColor = ThemeHelper.TextSecondary
             };
@@ -864,6 +931,16 @@ namespace PasteImageAsFile
             {
                 cmbSuperHubSens.BackColor = inputBg;
                 cmbSuperHubSens.ForeColor = text;
+            }
+            if (cmbSuperHubViewMode != null)
+            {
+                cmbSuperHubViewMode.BackColor = inputBg;
+                cmbSuperHubViewMode.ForeColor = text;
+            }
+            if (cmbSuperHubSize != null)
+            {
+                cmbSuperHubSize.BackColor = inputBg;
+                cmbSuperHubSize.ForeColor = text;
             }
 
             // Чекбоксы
@@ -1007,6 +1084,20 @@ namespace PasteImageAsFile
 
             bool isMove = string.Equals(Config.SuperHubDragMode, "Move", StringComparison.OrdinalIgnoreCase);
             cmbSuperHubDragMode.SelectedIndex = isMove ? 1 : 0;
+
+            // SuperHub ViewMode
+            bool isOnlyHub = string.Equals(Config.SuperHubViewMode, "OnlyHub", StringComparison.OrdinalIgnoreCase);
+            if (cmbSuperHubViewMode != null) cmbSuperHubViewMode.SelectedIndex = isOnlyHub ? 1 : 0;
+
+            // SuperHub Size Preset
+            int wV = Config.SuperHubWidthVertical;
+            if (cmbSuperHubSize != null)
+            {
+                if (wV <= 300) cmbSuperHubSize.SelectedIndex = 0;
+                else if (wV <= 380) cmbSuperHubSize.SelectedIndex = 1;
+                else if (wV <= 460) cmbSuperHubSize.SelectedIndex = 2;
+                else cmbSuperHubSize.SelectedIndex = 3;
+            }
 
             int sens = Config.SuperHubSensitivity;
             if (sens <= 40) cmbSuperHubSens.SelectedIndex = 0;

@@ -53,6 +53,7 @@ namespace PasteImageAsFile
 
         // Элементы для режима текста / документов
         private TextBox txtContent;
+        private Panel pnlTextBottom;
 
         private bool isPinned = false;
         private ToolTip toolTip;
@@ -156,6 +157,54 @@ namespace PasteImageAsFile
             this.Invalidate();
         }
 
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            LayoutControls();
+        }
+
+        private void LayoutControls()
+        {
+            int w = this.ClientSize.Width;
+            int h = this.ClientSize.Height;
+            if (w <= 0 || h <= 0) return;
+
+            if (pnlHeader != null)
+            {
+                pnlHeader.Bounds = new Rectangle(0, 0, w, 46);
+                RelayoutHeaderButtons();
+            }
+
+            int topY = 46;
+
+            if (IsImageItem())
+            {
+                int bottomH = 36;
+                if (pnlZoomBar != null)
+                {
+                    pnlZoomBar.Bounds = new Rectangle(0, h - bottomH, w, bottomH);
+                }
+                int contentH = Math.Max(20, h - topY - bottomH);
+                if (pnlImageContainer != null)
+                {
+                    pnlImageContainer.Bounds = new Rectangle(0, topY, w, contentH);
+                }
+            }
+            else
+            {
+                int bottomH = 34;
+                if (pnlTextBottom != null)
+                {
+                    pnlTextBottom.Bounds = new Rectangle(0, h - bottomH, w, bottomH);
+                }
+                int contentH = Math.Max(20, h - topY - bottomH);
+                if (txtContent != null)
+                {
+                    txtContent.Bounds = new Rectangle(0, topY, w, contentH);
+                }
+            }
+        }
+
         private void BuildUI()
         {
             this.SuspendLayout();
@@ -163,8 +212,8 @@ namespace PasteImageAsFile
             // 1. Шапка (Header) - 46px
             pnlHeader = new Panel
             {
-                Dock = DockStyle.Top,
-                Height = 46,
+                Location = new Point(0, 0),
+                Size = new Size(this.ClientSize.Width, 46),
                 BackColor = Color.FromArgb(30, 30, 30)
             };
 
@@ -229,6 +278,7 @@ namespace PasteImageAsFile
                 BuildTextViewer();
             }
 
+            LayoutControls();
             this.ResumeLayout(false);
         }
 
@@ -329,7 +379,6 @@ namespace PasteImageAsFile
 
             pnlImageContainer = new DoubleBufferedPanel
             {
-                Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(18, 18, 18)
             };
 
@@ -385,8 +434,6 @@ namespace PasteImageAsFile
             // Нижняя панель инструментов зума - 36px
             pnlZoomBar = new Panel
             {
-                Dock = DockStyle.Bottom,
-                Height = 36,
                 BackColor = Color.FromArgb(28, 28, 28)
             };
 
@@ -418,6 +465,7 @@ namespace PasteImageAsFile
 
             this.Controls.Add(pnlImageContainer);
             this.Controls.Add(pnlZoomBar);
+            LayoutControls();
 
             // Начальное вписывание картинки
             this.Shown += (s, e) => FitImageToWindow();
@@ -525,7 +573,6 @@ namespace PasteImageAsFile
         {
             txtContent = new TextBox
             {
-                Dock = DockStyle.Fill,
                 Multiline = true,
                 ScrollBars = ScrollBars.Both,
                 ReadOnly = true,
@@ -539,10 +586,8 @@ namespace PasteImageAsFile
             txtContent.Select(0, 0);
 
             // Нижняя информационная панель - 34px
-            Panel pnlTextBottom = new Panel
+            pnlTextBottom = new Panel
             {
-                Dock = DockStyle.Bottom,
-                Height = 34,
                 BackColor = Color.FromArgb(28, 28, 28)
             };
 
@@ -565,12 +610,19 @@ namespace PasteImageAsFile
                 }
             };
             pnlTextBottom.Controls.Add(btnCopyAll);
+
+            Button btnOpenNotepad = CreateZoomButton("Блокнот", this.Width - 286, 4, 90, 26, "Открыть текст во внешнем Блокноте Windows");
+            btnOpenNotepad.Click += (s, e) => OpenExternal();
+            pnlTextBottom.Controls.Add(btnOpenNotepad);
+
             pnlTextBottom.Resize += (s, e) => {
-                btnCopyAll.Left = pnlTextBottom.Width - 180;
+                btnCopyAll.Left = pnlTextBottom.Width - 175;
+                btnOpenNotepad.Left = btnCopyAll.Left - 96;
             };
 
             this.Controls.Add(txtContent);
             this.Controls.Add(pnlTextBottom);
+            LayoutControls();
         }
 
         private string ExtractTextContent()
@@ -933,6 +985,16 @@ namespace PasteImageAsFile
         {
             try
             {
+                if (item != null && item.Type == ClipboardItemType.Text)
+                {
+                    string tempDir = Path.Combine(Path.GetTempPath(), "PasteImageAsFile");
+                    if (!Directory.Exists(tempDir)) Directory.CreateDirectory(tempDir);
+                    string tempFile = Path.Combine(tempDir, string.Format("Заметка_{0:yyyyMMdd_HHmmss}.txt", DateTime.Now));
+                    File.WriteAllText(tempFile, item.TextContent ?? "", Encoding.UTF8);
+                    Process.Start(new ProcessStartInfo("notepad.exe", "\"" + tempFile + "\"") { UseShellExecute = true });
+                    return;
+                }
+
                 if (!string.IsNullOrEmpty(filePath) && (File.Exists(filePath) || Directory.Exists(filePath)))
                 {
                     Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true });

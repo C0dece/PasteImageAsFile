@@ -178,7 +178,7 @@ namespace PasteImageAsFile
             this.ShowInTaskbar = false;
             this.StartPosition = FormStartPosition.Manual;
             this.Size = new Size(Config.ClipboardFlyoutWidth, Config.ClipboardFlyoutHeight);
-            this.MinimumSize = new Size(320, 380);
+            this.MinimumSize = new Size(360, 380);
             this.DoubleBuffered = true;
             this.TopMost = true;
             this.KeyPreview = true;
@@ -186,7 +186,8 @@ namespace PasteImageAsFile
 
             toolTip = new ToolTip();
             toolTip.AutoPopDelay = 5000;
-            toolTip.InitialDelay = 400;
+            toolTip.InitialDelay = 350;
+            toolTip.ShowAlways = true;
 
             this.Shown += (s, e) => {
                 ApplyWindowStyles();
@@ -199,6 +200,13 @@ namespace PasteImageAsFile
                         ApplyTheme();
                         RefreshItems();
                     }));
+                }
+            };
+
+            ClipboardHistoryManager.Instance.HistoryChanged += () => {
+                if (!this.IsDisposed && this.IsHandleCreated)
+                {
+                    this.BeginInvoke((Action)RefreshItems);
                 }
             };
 
@@ -356,8 +364,23 @@ namespace PasteImageAsFile
             if (pnlActionHeader != null)
             {
                 pnlActionHeader.Width = w;
-                if (btnClearAll != null) btnClearAll.Location = new Point(w - 106, 6);
-                if (btnDragMode != null) btnDragMode.Location = new Point(w - 222, 6);
+                bool isCopy = string.Equals(Config.SuperHubDragMode, "Copy", StringComparison.OrdinalIgnoreCase);
+                if (btnClearAll != null)
+                {
+                    btnClearAll.Width = (w < 440) ? 78 : 96;
+                    btnClearAll.Text = (w < 440) ? "Очистить" : "Очистить все";
+                    btnClearAll.Location = new Point(w - btnClearAll.Width - 10, 6);
+                }
+                if (btnDragMode != null && btnClearAll != null)
+                {
+                    btnDragMode.Width = (w < 440) ? 84 : 108;
+                    btnDragMode.Text = (w < 440) ? (isCopy ? "Копия" : "Перенос") : (isCopy ? "Режим: Копия" : "Режим: Перенос");
+                    btnDragMode.Location = new Point(btnClearAll.Left - btnDragMode.Width - 8, 6);
+                }
+                if (lblSection != null && btnDragMode != null)
+                {
+                    lblSection.Width = Math.Max(40, btnDragMode.Left - 18);
+                }
             }
 
             if (pnlSearch != null)
@@ -380,20 +403,28 @@ namespace PasteImageAsFile
                     cardsContainer.Width = cardW;
                     foreach (Control c in cardsContainer.Controls)
                     {
+                        if (!(c is Panel)) continue;
                         c.Width = cardW;
+                        bool hasLaunchBtn = false;
+                        foreach (Control sub in c.Controls)
+                        {
+                            if (sub is Button && sub.Text == "▷") { hasLaunchBtn = true; break; }
+                        }
+                        int rightW = hasLaunchBtn ? 102 : 70;
+
                         foreach (Control sub in c.Controls)
                         {
                             if (sub is Button)
                             {
-                                if (sub.Text == "···") sub.Left = cardW - 30;
-                                else if (sub.Text == "👁") sub.Left = cardW - 58;
-                                else if (sub.Text == "▷") sub.Left = cardW - 86;
-                                else if (sub.Text == "📌") sub.Left = cardW - 30;
-                                else if (sub.Text == "📥") sub.Left = cardW - 58;
+                                if (sub.Text == "···") { sub.Left = cardW - 32; sub.Top = 6; }
+                                else if (sub.Text == "📥") { sub.Left = cardW - 64; sub.Top = 6; }
+                                else if (sub.Text == "▷") { sub.Left = cardW - 96; sub.Top = 6; }
+                                else if (sub.Text == "📌") { sub.Left = cardW - 32; sub.Top = 36; }
+                                else if (sub.Text == "👁") { sub.Left = cardW - 64; sub.Top = 36; }
                             }
-                            else if (sub is Label && sub.Left > 40)
+                            else if (sub is Label)
                             {
-                                sub.Width = Math.Max(40, cardW - sub.Left - 92);
+                                sub.Width = Math.Max(30, cardW - sub.Left - rightW - 10);
                             }
                         }
                     }
@@ -958,7 +989,7 @@ namespace PasteImageAsFile
 
         private Control CreateItemCard(ClipboardItem item, int width)
         {
-            int cardH = item.Type == ClipboardItemType.Image ? 76 : 68;
+            int cardH = item.Type == ClipboardItemType.Image ? 78 : 70;
 
             Panel card = new Panel
             {
@@ -1001,12 +1032,12 @@ namespace PasteImageAsFile
             bool hasLaunch = !string.IsNullOrEmpty(targetPathForLaunch);
 
             // Правые кнопки управления:
-            // 1. Вверху справа: кнопка действий [···]
+            // 1. Вверху справа: кнопка действий [···] (28x26)
             Button btnMenu = new Button
             {
                 Text = "···",
-                Location = new Point(card.Width - 30, 6),
-                Size = new Size(24, 22),
+                Location = new Point(card.Width - 32, 6),
+                Size = new Size(28, 26),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.Transparent,
                 ForeColor = ThemeHelper.TextSecondary,
@@ -1024,37 +1055,35 @@ namespace PasteImageAsFile
             toolTip.SetToolTip(btnMenu, "Меню действий");
             card.Controls.Add(btnMenu);
 
-            // 2. Вверху: кнопка быстрого предпросмотра [👁]
-            Button btnView = new Button
+            // 2. Вверху: кнопка быстрой вставки в активное окно [📥] (28x26)
+            Button btnPaste = new Button
             {
-                Text = "👁",
-                Location = new Point(card.Width - 58, 6),
-                Size = new Size(24, 22),
+                Text = "📥",
+                Location = new Point(card.Width - 64, 6),
+                Size = new Size(28, 26),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.Transparent,
                 ForeColor = ThemeHelper.TextSecondary,
-                Font = new Font("Segoe UI", 9f),
+                Font = new Font("Segoe UI", 9.5f),
                 Cursor = Cursors.Hand,
                 TabStop = false
             };
-            btnView.FlatAppearance.BorderSize = 0;
-            btnView.MouseEnter += (s, e) => { btnView.BackColor = ThemeHelper.ButtonHover; btnView.ForeColor = ThemeHelper.TextPrimary; };
-            btnView.MouseLeave += (s, e) => { btnView.BackColor = Color.Transparent; btnView.ForeColor = ThemeHelper.TextSecondary; };
-            btnView.Click += (s, e) => {
-                ItemViewerForm.ShowViewer(item);
-            };
-            toolTip.SetToolTip(btnView, "Просмотр содержимого (зум картинки, текст, документ)");
-            card.Controls.Add(btnView);
+            btnPaste.FlatAppearance.BorderSize = 0;
+            btnPaste.MouseEnter += (s, e) => { btnPaste.BackColor = ThemeHelper.ButtonHover; btnPaste.ForeColor = ThemeHelper.Accent; };
+            btnPaste.MouseLeave += (s, e) => { btnPaste.BackColor = Color.Transparent; btnPaste.ForeColor = ThemeHelper.TextSecondary; };
+            btnPaste.Click += (s, e) => PasteItem(item);
+            toolTip.SetToolTip(btnPaste, "Вставить в активное окно (эмуляция Ctrl+V в место каретки)");
+            card.Controls.Add(btnPaste);
 
-            // 3. Вверху: кнопка запуска / открытия файла [▷] (если это файл/ссылка)
+            // 3. Вверху: кнопка запуска / открытия файла [▷] (если это файл/ссылка) (28x26)
             Button btnLaunch = null;
             if (hasLaunch)
             {
                 btnLaunch = new Button
                 {
                     Text = "▷",
-                    Location = new Point(card.Width - 86, 6),
-                    Size = new Size(24, 22),
+                    Location = new Point(card.Width - 96, 6),
+                    Size = new Size(28, 26),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.Transparent,
                     ForeColor = ThemeHelper.TextSecondary,
@@ -1071,12 +1100,12 @@ namespace PasteImageAsFile
                 card.Controls.Add(btnLaunch);
             }
 
-            // 4. Внизу справа: кнопка закрепления [📌]
+            // 4. Внизу справа: кнопка закрепления [📌] (28x26)
             Button btnPin = new Button
             {
                 Text = "📌",
-                Location = new Point(card.Width - 30, card.Height - 28),
-                Size = new Size(24, 22),
+                Location = new Point(card.Width - 32, 36),
+                Size = new Size(28, 26),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.Transparent,
                 ForeColor = item.IsPinned ? ThemeHelper.Accent : ThemeHelper.TextMuted,
@@ -1097,30 +1126,32 @@ namespace PasteImageAsFile
             toolTip.SetToolTip(btnPin, item.IsPinned ? "Открепить" : "Закрепить вверху");
             card.Controls.Add(btnPin);
 
-            // 5. Внизу: кнопка быстрой вставки в активное окно [📥]
-            Button btnPaste = new Button
+            // 5. Внизу: кнопка быстрого предпросмотра [👁] (28x26)
+            Button btnView = new Button
             {
-                Text = "📥",
-                Location = new Point(card.Width - 58, card.Height - 28),
-                Size = new Size(24, 22),
+                Text = "👁",
+                Location = new Point(card.Width - 64, 36),
+                Size = new Size(28, 26),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.Transparent,
                 ForeColor = ThemeHelper.TextSecondary,
-                Font = new Font("Segoe UI", 9f),
+                Font = new Font("Segoe UI", 9.5f),
                 Cursor = Cursors.Hand,
                 TabStop = false
             };
-            btnPaste.FlatAppearance.BorderSize = 0;
-            btnPaste.MouseEnter += (s, e) => { btnPaste.BackColor = ThemeHelper.ButtonHover; btnPaste.ForeColor = ThemeHelper.Accent; };
-            btnPaste.MouseLeave += (s, e) => { btnPaste.BackColor = Color.Transparent; btnPaste.ForeColor = ThemeHelper.TextSecondary; };
-            btnPaste.Click += (s, e) => PasteItem(item);
-            toolTip.SetToolTip(btnPaste, "Вставить в активное окно (эмуляция Ctrl+V в место каретки)");
-            card.Controls.Add(btnPaste);
+            btnView.FlatAppearance.BorderSize = 0;
+            btnView.MouseEnter += (s, e) => { btnView.BackColor = ThemeHelper.ButtonHover; btnView.ForeColor = ThemeHelper.TextPrimary; };
+            btnView.MouseLeave += (s, e) => { btnView.BackColor = Color.Transparent; btnView.ForeColor = ThemeHelper.TextSecondary; };
+            btnView.Click += (s, e) => {
+                ItemViewerForm.ShowViewer(item);
+            };
+            toolTip.SetToolTip(btnView, "Просмотр содержимого (зум картинки, текст, документ)");
+            card.Controls.Add(btnView);
 
             // Контентная часть карточки
-            int rightControlsWidth = hasLaunch ? 92 : 64;
+            int rightControlsWidth = hasLaunch ? 102 : 70;
             int textLeft = 14;
-            int textWidth = card.Width - rightControlsWidth - 14;
+            int textWidth = Math.Max(40, card.Width - rightControlsWidth - 10);
 
             if (item.Type == ClipboardItemType.Image && SafeFileExists(item.ImagePath))
             {

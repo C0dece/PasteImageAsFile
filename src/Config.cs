@@ -131,6 +131,36 @@ namespace PasteImageAsFile
             set { SetDword("SuperHubSensitivity", value); }
         }
 
+        public static string SuperHubViewMode
+        {
+            get { return GetString("SuperHubViewMode", "Tabs"); }
+            set { SetString("SuperHubViewMode", value); }
+        }
+
+        public static int SuperHubWidthVertical
+        {
+            get { return Math.Max(260, Math.Min(900, GetDword("SuperHubWidthVertical", 340))); }
+            set { SetDword("SuperHubWidthVertical", Math.Max(260, Math.Min(900, value))); }
+        }
+
+        public static int SuperHubHeightVertical
+        {
+            get { return Math.Max(300, Math.Min(1200, GetDword("SuperHubHeightVertical", 500))); }
+            set { SetDword("SuperHubHeightVertical", Math.Max(300, Math.Min(1200, value))); }
+        }
+
+        public static int SuperHubWidthHorizontal
+        {
+            get { return Math.Max(380, Math.Min(1400, GetDword("SuperHubWidthHorizontal", 620))); }
+            set { SetDword("SuperHubWidthHorizontal", Math.Max(380, Math.Min(1400, value))); }
+        }
+
+        public static int SuperHubHeightHorizontal
+        {
+            get { return Math.Max(160, Math.Min(600, GetDword("SuperHubHeightHorizontal", 220))); }
+            set { SetDword("SuperHubHeightHorizontal", Math.Max(160, Math.Min(600, value))); }
+        }
+
         private static int GetDword(string name, int defaultValue)
         {
             try
