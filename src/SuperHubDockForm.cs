@@ -1410,9 +1410,8 @@ namespace PasteImageAsFile
                 BackColor = Color.Transparent,
                 Cursor = Cursors.Hand
             };
-            if (iconImg != null) pic.Image = iconImg;
-            else pic.Image = SystemIcons.Application.ToBitmap();
-            card.Controls.Add(pic);
+            try { pic.Image = iconImg ?? SystemIcons.Application.ToBitmap(); } catch {}
+            try { card.Controls.Add(pic); } catch {}
 
             // Сетка кнопок действий 2x2 справа (24x24)
             // Верх: [👁] и [✕]
@@ -1611,9 +1610,8 @@ namespace PasteImageAsFile
                 BackColor = Color.Transparent,
                 Cursor = Cursors.Hand
             };
-            if (iconImg != null) pic.Image = iconImg;
-            else pic.Image = SystemIcons.Application.ToBitmap();
-            card.Controls.Add(pic);
+            try { pic.Image = iconImg ?? SystemIcons.Application.ToBitmap(); } catch {}
+            try { card.Controls.Add(pic); } catch {}
 
             // Кнопка удаления [✕] (24x24) в правом верхнем углу
             Button btnRemove = CreateToolButton("✕", card.Width - 28, 4, 24, 24, "Убрать файл с полки");
@@ -1792,9 +1790,8 @@ namespace PasteImageAsFile
                 BackColor = Color.Transparent,
                 Cursor = Cursors.Hand
             };
-            if (iconImg != null) pic.Image = iconImg;
-            else pic.Image = SystemIcons.Application.ToBitmap();
-            card.Controls.Add(pic);
+            try { pic.Image = iconImg ?? SystemIcons.Application.ToBitmap(); } catch {}
+            try { card.Controls.Add(pic); } catch {}
 
             // Сетка кнопок действий 2x2 справа (24x24)
             // Верх: [📥] и [✕]
@@ -1999,9 +1996,8 @@ namespace PasteImageAsFile
                 BackColor = Color.Transparent,
                 Cursor = Cursors.Hand
             };
-            if (iconImg != null) pic.Image = iconImg;
-            else pic.Image = SystemIcons.Application.ToBitmap();
-            card.Controls.Add(pic);
+            try { pic.Image = iconImg ?? SystemIcons.Application.ToBitmap(); } catch {}
+            try { card.Controls.Add(pic); } catch {}
 
             // Кнопка удаления [✕] (24x24) в правом верхнем углу
             Button btnDelete = CreateToolButton("✕", card.Width - 30, 4, 24, 24, "Удалить запись из истории буфера");

@@ -1571,8 +1571,7 @@ namespace PasteImageAsFile
                     }
                 }
                 catch {}
-                card.Controls.Add(pic);
-                infoControls.Add(pic);
+                try { card.Controls.Add(pic); infoControls.Add(pic); } catch {}
 
                 textLeft = 74;
                 textWidth = Math.Max(40, card.Width - textLeft - 70);
@@ -1618,11 +1617,10 @@ namespace PasteImageAsFile
                     Size = new Size(36, 36),
                     SizeMode = PictureBoxSizeMode.CenterImage,
                     BackColor = Color.Transparent,
-                    Image = ico,
                     Cursor = Cursors.Hand
                 };
-                card.Controls.Add(pic);
-                infoControls.Add(pic);
+                try { pic.Image = ico; } catch {}
+                try { card.Controls.Add(pic); infoControls.Add(pic); } catch {}
 
                 textLeft = 54;
                 textWidth = Math.Max(40, card.Width - textLeft - 70);
