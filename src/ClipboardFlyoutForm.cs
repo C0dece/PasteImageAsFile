@@ -142,6 +142,7 @@ namespace PasteImageAsFile
         private IntPtr previousForegroundWindow = IntPtr.Zero;
         private FlyoutTopBarPanel pnlTopBar;
         private Label lblAppHeader;
+        private Button btnOpenSettings;
         private Panel pnlMainTabs;
         private Button btnMainClipboard;
         private Button btnMainSuperHub;
@@ -152,7 +153,6 @@ namespace PasteImageAsFile
         private readonly string[] filterNames = new string[] { "Все", "Снимки", "Текст", "Файлы" };
         private readonly List<Button> filterButtons = new List<Button>();
 
-        private Button btnDragAll;
         private Panel pnlDropHint;
         private Label lblDropHint;
 
@@ -197,8 +197,9 @@ namespace PasteImageAsFile
             this.AllowDrop = true;
 
             toolTip = new ToolTip();
-            toolTip.AutoPopDelay = 5000;
-            toolTip.InitialDelay = 350;
+            toolTip.AutoPopDelay = 6000;
+            toolTip.InitialDelay = 200;
+            toolTip.ReshowDelay = 100;
             toolTip.ShowAlways = true;
 
             this.Shown += (s, e) => {
@@ -272,12 +273,6 @@ namespace PasteImageAsFile
                 btnClearAll.ForeColor = ThemeHelper.TextPrimary;
             }
 
-            if (btnDragAll != null)
-            {
-                btnDragAll.BackColor = ThemeHelper.CardBackground;
-                btnDragAll.ForeColor = ThemeHelper.TextPrimary;
-            }
-
             if (pnlSearch != null) pnlSearch.BackColor = ThemeHelper.Background;
             if (searchBoxBg != null) searchBoxBg.BackColor = ThemeHelper.CardBackground;
             if (txtSearch != null)
@@ -339,6 +334,17 @@ namespace PasteImageAsFile
             openAnimTimer = new System.Windows.Forms.Timer();
             openAnimTimer.Interval = 12;
             openAnimTimer.Tick += (s, e) => {
+                if (this.IsDisposed || !this.IsHandleCreated)
+                {
+                    if (openAnimTimer != null)
+                    {
+                        openAnimTimer.Stop();
+                        openAnimTimer.Dispose();
+                        openAnimTimer = null;
+                    }
+                    return;
+                }
+
                 openAnimStep++;
                 float t = (float)openAnimStep / OpenAnimTotalSteps;
                 if (t > 1.0f) t = 1.0f;
@@ -415,22 +421,37 @@ namespace PasteImageAsFile
             int h = this.ClientSize.Height;
 
             pnlTopBar.Width = w;
-            if (btnClose != null) btnClose.Location = new Point(w - 32, 3);
-            if (btnPinWindow != null) btnPinWindow.Location = new Point(w - 60, 3);
+            int rightX = w - 10;
+            if (btnClose != null)
+            {
+                btnClose.Location = new Point(rightX - 26, 3);
+                rightX -= (26 + 6);
+            }
+            if (btnPinWindow != null)
+            {
+                btnPinWindow.Location = new Point(rightX - 26, 3);
+                rightX -= (26 + 6);
+            }
+            if (btnOpenSettings != null)
+            {
+                btnOpenSettings.Location = new Point(rightX - 26, 3);
+            }
 
             if (pnlMainTabs != null)
             {
                 pnlMainTabs.Location = new Point(0, 30);
                 pnlMainTabs.Width = w;
-                int tabW = Math.Min(140, (w - 28) / 2);
+                int tabMargin = 12;
+                int tabGap = 8;
+                int tabW = Math.Max(100, (w - tabMargin * 2 - tabGap) / 2);
                 if (btnMainClipboard != null)
                 {
-                    btnMainClipboard.Location = new Point(12, 2);
+                    btnMainClipboard.Location = new Point(tabMargin, 2);
                     btnMainClipboard.Size = new Size(tabW, 28);
                 }
                 if (btnMainSuperHub != null)
                 {
-                    btnMainSuperHub.Location = new Point(16 + tabW, 2);
+                    btnMainSuperHub.Location = new Point(tabMargin + tabW + tabGap, 2);
                     btnMainSuperHub.Size = new Size(tabW, 28);
                 }
             }
@@ -450,10 +471,10 @@ namespace PasteImageAsFile
                     {
                         filterButtons[i].Visible = true;
                         filterButtons[i].Location = new Point(subX, 3);
-                        subX += filterButtons[i].Width + 4;
+                        subX += filterButtons[i].Width + 6;
                     }
 
-                    if (btnDragAll != null) btnDragAll.Visible = false;
+                    if (btnDragMode != null) btnDragMode.Visible = false;
 
                     // Кнопка очистить
                     if (btnClearAll != null)
@@ -462,23 +483,10 @@ namespace PasteImageAsFile
                         btnClearAll.Text = "Очистить";
                         btnClearAll.Location = new Point(w - btnClearAll.Width - 12, 3);
                     }
-
-                    // Тумблер режима копирования
-                    if (btnDragMode != null)
-                    {
-                        bool isCopy = string.Equals(Config.SuperHubDragMode, "Copy", StringComparison.OrdinalIgnoreCase);
-                        btnDragMode.Visible = (w >= 390);
-                        if (btnDragMode.Visible)
-                        {
-                            btnDragMode.Width = 72;
-                            btnDragMode.Text = isCopy ? "Копия" : "Перенос";
-                            btnDragMode.Location = new Point(btnClearAll.Left - btnDragMode.Width - 8, 3);
-                        }
-                    }
                 }
                 else
                 {
-                    // SuperHub: подвкладок нет!
+                    // SuperHub: подвкладок нет
                     for (int i = 0; i < filterButtons.Count; i++)
                     {
                         filterButtons[i].Visible = false;
@@ -491,13 +499,6 @@ namespace PasteImageAsFile
                         btnDragMode.Width = 72;
                         btnDragMode.Text = isCopy ? "Копия" : "Перенос";
                         btnDragMode.Location = new Point(12, 3);
-                    }
-
-                    if (btnDragAll != null)
-                    {
-                        btnDragAll.Visible = true;
-                        btnDragAll.Location = new Point(btnDragMode != null ? btnDragMode.Right + 8 : 12, 3);
-                        btnDragAll.Size = new Size(60, 24);
                     }
 
                     if (btnClearAll != null)
@@ -515,8 +516,12 @@ namespace PasteImageAsFile
                 pnlSearch.Visible = isClipboard;
                 if (pnlSearch.Visible)
                 {
-                    pnlSearch.Location = new Point(0, thirdY);
-                    pnlSearch.Width = w;
+                    pnlSearch.Location = new Point(12, thirdY);
+                    pnlSearch.Width = Math.Max(100, w - 24);
+                    if (searchBoxBg != null)
+                    {
+                        searchBoxBg.Width = pnlSearch.Width;
+                    }
                     if (txtSearch != null && searchBoxBg != null)
                     {
                         txtSearch.Width = Math.Max(100, searchBoxBg.ClientSize.Width - 36);
@@ -538,10 +543,11 @@ namespace PasteImageAsFile
             if (pnlViewport != null)
             {
                 pnlViewport.Location = new Point(0, contentTop);
-                pnlViewport.Size = new Size(w, Math.Max(50, h - contentTop - 2));
+                pnlViewport.Size = new Size(w, Math.Max(50, h - contentTop - 4));
                 if (cardsContainer != null)
                 {
                     int cardW = Math.Max(100, pnlViewport.ClientSize.Width - 24);
+                    cardsContainer.Location = new Point(12, cardsContainer.Top);
                     cardsContainer.Width = cardW;
                     foreach (Control c in cardsContainer.Controls)
                     {
@@ -553,16 +559,16 @@ namespace PasteImageAsFile
                             if (sub is Button)
                             {
                                 string tag = sub.Tag != null ? sub.Tag.ToString() : "";
-                                if (tag == "c1_r1") { sub.Left = cardW - 60; sub.Top = 6; }
-                                else if (tag == "c2_r1") { sub.Left = cardW - 30; sub.Top = 6; }
-                                else if (tag == "c1_r2") { sub.Left = cardW - 60; sub.Top = 36; }
-                                else if (tag == "c2_r2") { sub.Left = cardW - 30; sub.Top = 36; }
-                                else if (tag == "hub_view") { sub.Left = cardW - 60; sub.Top = (c.Height - sub.Height) / 2; }
-                                else if (tag == "hub_remove") { sub.Left = cardW - 30; sub.Top = (c.Height - sub.Height) / 2; }
+                                if (tag == "c1_r1") { sub.Left = cardW - 62; sub.Top = 6; }
+                                else if (tag == "c2_r1") { sub.Left = cardW - 32; sub.Top = 6; }
+                                else if (tag == "c1_r2") { sub.Left = cardW - 62; sub.Top = 36; }
+                                else if (tag == "c2_r2") { sub.Left = cardW - 32; sub.Top = 36; }
+                                else if (tag == "hub_view") { sub.Left = cardW - 62; sub.Top = (c.Height - sub.Height) / 2; }
+                                else if (tag == "hub_remove") { sub.Left = cardW - 32; sub.Top = (c.Height - sub.Height) / 2; }
                             }
                             else if (sub is Label)
                             {
-                                sub.Width = Math.Max(30, cardW - sub.Left - 66);
+                                sub.Width = Math.Max(30, cardW - sub.Left - 70);
                             }
                         }
                     }
@@ -621,8 +627,10 @@ namespace PasteImageAsFile
                 Cursor = Cursors.Hand
             };
             btnClose.FlatAppearance.BorderSize = 0;
-            btnClose.MouseEnter += (s, e) => { btnClose.BackColor = Color.FromArgb(196, 43, 28); btnClose.ForeColor = Color.White; };
-            btnClose.MouseLeave += (s, e) => { btnClose.BackColor = Color.Transparent; btnClose.ForeColor = ThemeHelper.TextSecondary; };
+            btnClose.FlatAppearance.MouseOverBackColor = Color.FromArgb(196, 43, 28);
+            btnClose.FlatAppearance.MouseDownBackColor = Color.FromArgb(160, 30, 20);
+            btnClose.MouseEnter += (s, e) => { btnClose.ForeColor = Color.White; };
+            btnClose.MouseLeave += (s, e) => { btnClose.ForeColor = ThemeHelper.TextSecondary; };
             btnClose.Click += (s, e) => CloseFlyout();
             toolTip.SetToolTip(btnClose, "Закрыть (Esc)");
             pnlTopBar.Controls.Add(btnClose);
@@ -640,8 +648,8 @@ namespace PasteImageAsFile
                 Cursor = Cursors.Hand
             };
             btnPinWindow.FlatAppearance.BorderSize = 0;
-            btnPinWindow.MouseEnter += (s, e) => { if (!isWindowPinned) btnPinWindow.BackColor = ThemeHelper.ButtonHover; };
-            btnPinWindow.MouseLeave += (s, e) => { if (!isWindowPinned) btnPinWindow.BackColor = Color.Transparent; };
+            btnPinWindow.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+            btnPinWindow.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
             btnPinWindow.Click += (s, e) => {
                 isWindowPinned = !isWindowPinned;
                 btnPinWindow.BackColor = isWindowPinned ? ThemeHelper.AccentBackground : Color.Transparent;
@@ -652,7 +660,7 @@ namespace PasteImageAsFile
             pnlTopBar.Controls.Add(btnPinWindow);
 
             // Кнопка быстрого доступа к настройкам [⚙️]
-            Button btnOpenSettings = new Button
+            btnOpenSettings = new Button
             {
                 Text = "⚙️",
                 Location = new Point(this.Width - 94, 4),
@@ -664,8 +672,8 @@ namespace PasteImageAsFile
                 Cursor = Cursors.Hand
             };
             btnOpenSettings.FlatAppearance.BorderSize = 0;
-            btnOpenSettings.MouseEnter += (s, e) => btnOpenSettings.BackColor = ThemeHelper.ButtonHover;
-            btnOpenSettings.MouseLeave += (s, e) => btnOpenSettings.BackColor = Color.Transparent;
+            btnOpenSettings.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+            btnOpenSettings.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
             btnOpenSettings.Click += (s, e) => { Program.ShowMainForm(); };
             toolTip.SetToolTip(btnOpenSettings, "Открыть окно настроек");
             pnlTopBar.Controls.Add(btnOpenSettings);
@@ -696,6 +704,8 @@ namespace PasteImageAsFile
                 TabStop = false
             };
             btnMainClipboard.FlatAppearance.BorderSize = 0;
+            btnMainClipboard.FlatAppearance.MouseOverBackColor = Color.FromArgb(35, 255, 255, 255);
+            btnMainClipboard.FlatAppearance.MouseDownBackColor = Color.FromArgb(60, 255, 255, 255);
             btnMainClipboard.Click += (s, e) => SwitchMainTab(0);
             pnlMainTabs.Controls.Add(btnMainClipboard);
 
@@ -713,6 +723,8 @@ namespace PasteImageAsFile
                 TabStop = false
             };
             btnMainSuperHub.FlatAppearance.BorderSize = 0;
+            btnMainSuperHub.FlatAppearance.MouseOverBackColor = Color.FromArgb(35, 255, 255, 255);
+            btnMainSuperHub.FlatAppearance.MouseDownBackColor = Color.FromArgb(60, 255, 255, 255);
             btnMainSuperHub.Click += (s, e) => SwitchMainTab(1);
             pnlMainTabs.Controls.Add(btnMainSuperHub);
 
@@ -720,7 +732,7 @@ namespace PasteImageAsFile
                 Button actBtn = (currentMainTab == 0) ? btnMainClipboard : btnMainSuperHub;
                 if (actBtn != null)
                 {
-                    int barW = Math.Min(40, actBtn.Width - 16);
+                    int barW = Math.Min(48, actBtn.Width - 20);
                     int barX = actBtn.Left + (actBtn.Width - barW) / 2;
                     using (var brush = new SolidBrush(ThemeHelper.Accent))
                     using (var path = CreateRoundedPath(new Rectangle(barX, pnlMainTabs.Height - 3, barW, 3), 1))
@@ -759,10 +771,12 @@ namespace PasteImageAsFile
                     TabStop = false
                 };
                 fBtn.FlatAppearance.BorderSize = 0;
+                fBtn.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+                fBtn.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
                 fBtn.Click += (s, e) => SwitchFilter(fIdx);
                 filterButtons.Add(fBtn);
                 pnlSubBar.Controls.Add(fBtn);
-                subX += fBtn.Width + 4;
+                subX += fBtn.Width + 6;
             }
 
             // Тумблер режима перетаскивания (Копия / Перенос)
@@ -777,6 +791,8 @@ namespace PasteImageAsFile
                 TabStop = false
             };
             btnDragMode.FlatAppearance.BorderSize = 0;
+            btnDragMode.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+            btnDragMode.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
             btnDragMode.Click += (s, e) => {
                 bool isCopy = string.Equals(Config.SuperHubDragMode, "Copy", StringComparison.OrdinalIgnoreCase);
                 Config.SuperHubDragMode = isCopy ? "Move" : "Copy";
@@ -787,27 +803,6 @@ namespace PasteImageAsFile
                 }
             };
             pnlSubBar.Controls.Add(btnDragMode);
-
-            // Кнопка "Перетащить все" [Все] для SuperHub
-            btnDragAll = new Button
-            {
-                Text = "Все",
-                Location = new Point(90, 3),
-                Size = new Size(54, 24),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = ThemeHelper.CardBackground,
-                ForeColor = ThemeHelper.TextPrimary,
-                Font = new Font("Segoe UI Semibold", 8.5f, FontStyle.Bold),
-                Cursor = Cursors.Hand,
-                Visible = false,
-                TabStop = false
-            };
-            btnDragAll.FlatAppearance.BorderSize = 0;
-            btnDragAll.MouseDown += (s, e) => {
-                if (e.Button == MouseButtons.Left) DragAllFilesOut();
-            };
-            toolTip.SetToolTip(btnDragAll, "Зажать левой кнопкой мыши и перетащить все файлы полки наружу");
-            pnlSubBar.Controls.Add(btnDragAll);
 
             // Кнопка очистки
             btnClearAll = new Button
@@ -823,6 +818,8 @@ namespace PasteImageAsFile
                 TabStop = false
             };
             btnClearAll.FlatAppearance.BorderSize = 0;
+            btnClearAll.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+            btnClearAll.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
             btnClearAll.MouseEnter += (s, e) => btnClearAll.BackColor = ThemeHelper.ButtonHover;
             btnClearAll.MouseLeave += (s, e) => btnClearAll.BackColor = ThemeHelper.CardBackground;
             btnClearAll.Click += (s, e) => {
@@ -1203,50 +1200,30 @@ namespace PasteImageAsFile
             UpdateDragModeButtonVisual();
         }
 
-        private void DragAllFilesOut()
+        private static void SafeDisposeControls(Control parent)
         {
-            try
+            if (parent == null) return;
+            for (int i = parent.Controls.Count - 1; i >= 0; i--)
             {
-                var hubItems = ClipboardHistoryManager.Instance.GetItems(null, true);
-                var files = new StringCollection();
-                foreach (var it in hubItems)
+                try
                 {
-                    if (it.Type == ClipboardItemType.Files && it.FilePaths != null)
+                    Control c = parent.Controls[i];
+                    parent.Controls.RemoveAt(i);
+                    var pic = c as PictureBox;
+                    if (pic != null && pic.Image != null)
                     {
-                        foreach (var f in it.FilePaths)
-                        {
-                            if (SafeFileExists(f) || SafeDirectoryExists(f)) files.Add(f);
-                        }
+                        try { pic.Image.Dispose(); pic.Image = null; } catch {}
                     }
-                    else if (it.Type == ClipboardItemType.Image && SafeFileExists(it.ImagePath))
-                    {
-                        files.Add(it.ImagePath);
-                    }
+                    c.Dispose();
                 }
-                if (files.Count == 0)
-                {
-                    MessageBox.Show("На полке SuperHub нет файлов для перетаскивания.", "SuperHub", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-
-                DataObject data = new DataObject();
-                bool isMove = string.Equals(Config.SuperHubDragMode, "Move", StringComparison.OrdinalIgnoreCase);
-                var dropEffectStream = new MemoryStream(new byte[] { (byte)(isMove ? 2 : 1), 0, 0, 0 });
-                data.SetData("Preferred DropEffect", dropEffectStream);
-                data.SetFileDropList(files);
-
-                btnDragAll.DoDragDrop(data, isMove ? DragDropEffects.Move : DragDropEffects.Copy);
-            }
-            catch (Exception ex)
-            {
-                Logger.Log("DragAllFilesOut error: " + ex.Message);
+                catch {}
             }
         }
 
         public void RefreshItems()
         {
             cardsContainer.SuspendLayout();
-            cardsContainer.Controls.Clear();
+            SafeDisposeControls(cardsContainer);
 
             bool isHub = (currentMainTab == 1);
             ClipboardItemType? filter = null;
@@ -1350,8 +1327,8 @@ namespace PasteImageAsFile
             }
             bool hasLaunch = !string.IsNullOrEmpty(targetPathForLaunch);
 
-            // Строгая сетка кнопок 2x2 справа (ширина 60px):
-            // Колонка 1: X = card.Width - 60, Колонка 2: X = card.Width - 30
+            // Строгая сетка кнопок 2x2 справа (ширина 56px, отступ 4px):
+            // Колонка 1: X = card.Width - 58, Колонка 2: X = card.Width - 28
             // Ряд 1: Y = 6, Ряд 2: Y = 36
             if (!isHub)
             {
@@ -1360,8 +1337,8 @@ namespace PasteImageAsFile
                 Button btnPaste = new Button
                 {
                     Text = "📥",
-                    Location = new Point(card.Width - 60, 6),
-                    Size = new Size(28, 26),
+                    Location = new Point(card.Width - 62, 6),
+                    Size = new Size(26, 26),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.Transparent,
                     ForeColor = ThemeHelper.TextSecondary,
@@ -1371,45 +1348,46 @@ namespace PasteImageAsFile
                     Tag = "c1_r1"
                 };
                 btnPaste.FlatAppearance.BorderSize = 0;
-                btnPaste.MouseEnter += (s, e) => { btnPaste.BackColor = ThemeHelper.ButtonHover; btnPaste.ForeColor = ThemeHelper.Accent; };
-                btnPaste.MouseLeave += (s, e) => { btnPaste.BackColor = Color.Transparent; btnPaste.ForeColor = ThemeHelper.TextSecondary; };
+                btnPaste.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+                btnPaste.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
+                btnPaste.MouseEnter += (s, e) => { btnPaste.ForeColor = ThemeHelper.Accent; };
+                btnPaste.MouseLeave += (s, e) => { btnPaste.ForeColor = ThemeHelper.TextSecondary; };
                 btnPaste.Click += (s, e) => PasteItem(item);
-                toolTip.SetToolTip(btnPaste, "Вставить в активное окно (эмуляция Ctrl+V в место каретки)");
+                toolTip.SetToolTip(btnPaste, "Вставить в активное окно (Ctrl+V)");
                 card.Controls.Add(btnPaste);
 
-                // 2. c2_r1: Закрепление вверху [📌]
-                Button btnPin = new Button
+                // 2. c2_r1: Удалить из истории буфера обмена [✕]
+                Button btnDelete = new Button
                 {
-                    Text = "📌",
-                    Location = new Point(card.Width - 30, 6),
-                    Size = new Size(28, 26),
+                    Text = "✕",
+                    Location = new Point(card.Width - 32, 6),
+                    Size = new Size(26, 26),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.Transparent,
-                    ForeColor = item.IsPinned ? ThemeHelper.Accent : ThemeHelper.TextMuted,
-                    Font = new Font("Segoe UI Emoji", 8.5f),
+                    ForeColor = ThemeHelper.TextSecondary,
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                     Cursor = Cursors.Hand,
                     TabStop = false,
                     Tag = "c2_r1"
                 };
-                btnPin.FlatAppearance.BorderSize = 0;
-                btnPin.MouseEnter += (s, e) => { btnPin.BackColor = ThemeHelper.ButtonHover; btnPin.ForeColor = ThemeHelper.TextPrimary; };
-                btnPin.MouseLeave += (s, e) => {
-                    btnPin.BackColor = Color.Transparent;
-                    btnPin.ForeColor = item.IsPinned ? ThemeHelper.Accent : ThemeHelper.TextMuted;
-                };
-                btnPin.Click += (s, e) => {
-                    ClipboardHistoryManager.Instance.TogglePin(item.Id);
+                btnDelete.FlatAppearance.BorderSize = 0;
+                btnDelete.FlatAppearance.MouseOverBackColor = Color.FromArgb(196, 43, 28);
+                btnDelete.FlatAppearance.MouseDownBackColor = Color.FromArgb(160, 30, 20);
+                btnDelete.MouseEnter += (s, e) => { btnDelete.ForeColor = Color.White; };
+                btnDelete.MouseLeave += (s, e) => { btnDelete.ForeColor = ThemeHelper.TextSecondary; };
+                btnDelete.Click += (s, e) => {
+                    ClipboardHistoryManager.Instance.DeleteItem(item.Id);
                     RefreshItems();
                 };
-                toolTip.SetToolTip(btnPin, item.IsPinned ? "Открепить" : "Закрепить вверху");
-                card.Controls.Add(btnPin);
+                toolTip.SetToolTip(btnDelete, "Удалить элемент из истории буфера");
+                card.Controls.Add(btnDelete);
 
                 // 3. c1_r2: Быстрый просмотр [👁]
                 Button btnView = new Button
                 {
                     Text = "👁",
-                    Location = new Point(card.Width - 60, 36),
-                    Size = new Size(28, 26),
+                    Location = new Point(card.Width - 62, 36),
+                    Size = new Size(26, 26),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.Transparent,
                     ForeColor = ThemeHelper.TextSecondary,
@@ -1419,46 +1397,41 @@ namespace PasteImageAsFile
                     Tag = "c1_r2"
                 };
                 btnView.FlatAppearance.BorderSize = 0;
-                btnView.MouseEnter += (s, e) => { btnView.BackColor = ThemeHelper.ButtonHover; btnView.ForeColor = ThemeHelper.TextPrimary; };
-                btnView.MouseLeave += (s, e) => { btnView.BackColor = Color.Transparent; btnView.ForeColor = ThemeHelper.TextSecondary; };
+                btnView.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+                btnView.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
+                btnView.MouseEnter += (s, e) => { btnView.ForeColor = ThemeHelper.TextPrimary; };
+                btnView.MouseLeave += (s, e) => { btnView.ForeColor = ThemeHelper.TextSecondary; };
                 btnView.Click += (s, e) => ItemViewerForm.ShowViewer(item);
-                toolTip.SetToolTip(btnView, "Просмотр содержимого (зум картинки, текст, документ)");
+                toolTip.SetToolTip(btnView, "Просмотр содержимого");
                 card.Controls.Add(btnView);
 
-                // 4. c2_r2: Запуск в Windows [▷] ИЛИ Меню действий [···]
-                Button btnAction = new Button
+                // 4. c2_r2: Закрепление вверху [📌]
+                Button btnPin = new Button
                 {
-                    Location = new Point(card.Width - 30, 36),
-                    Size = new Size(28, 26),
+                    Text = "📌",
+                    Location = new Point(card.Width - 32, 36),
+                    Size = new Size(26, 26),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.Transparent,
-                    ForeColor = ThemeHelper.TextSecondary,
+                    ForeColor = item.IsPinned ? ThemeHelper.Accent : ThemeHelper.TextMuted,
+                    Font = new Font("Segoe UI Emoji", 8.5f),
                     Cursor = Cursors.Hand,
                     TabStop = false,
                     Tag = "c2_r2"
                 };
-                btnAction.FlatAppearance.BorderSize = 0;
-                if (hasLaunch)
-                {
-                    btnAction.Text = "▷";
-                    btnAction.Font = new Font("Segoe UI", 9f);
-                    string launchTarget = targetPathForLaunch;
-                    btnAction.Click += (s, e) => OpenItemInAssociatedApp(launchTarget);
-                    toolTip.SetToolTip(btnAction, "Открыть / Запустить файл в ассоциированной программе Windows\n(Контекстное меню доступно по правому клику)");
-                }
-                else
-                {
-                    btnAction.Text = "···";
-                    btnAction.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
-                    btnAction.Click += (s, e) => {
-                        ContextMenu cm = CreateCardContextMenu(item);
-                        cm.Show(btnAction, new Point(0, btnAction.Height));
-                    };
-                    toolTip.SetToolTip(btnAction, "Меню действий");
-                }
-                btnAction.MouseEnter += (s, e) => { btnAction.BackColor = ThemeHelper.ButtonHover; btnAction.ForeColor = ThemeHelper.TextPrimary; };
-                btnAction.MouseLeave += (s, e) => { btnAction.BackColor = Color.Transparent; btnAction.ForeColor = ThemeHelper.TextSecondary; };
-                card.Controls.Add(btnAction);
+                btnPin.FlatAppearance.BorderSize = 0;
+                btnPin.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+                btnPin.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
+                btnPin.MouseEnter += (s, e) => { btnPin.ForeColor = ThemeHelper.TextPrimary; };
+                btnPin.MouseLeave += (s, e) => {
+                    btnPin.ForeColor = item.IsPinned ? ThemeHelper.Accent : ThemeHelper.TextMuted;
+                };
+                btnPin.Click += (s, e) => {
+                    ClipboardHistoryManager.Instance.TogglePin(item.Id);
+                    RefreshItems();
+                };
+                toolTip.SetToolTip(btnPin, item.IsPinned ? "Открепить" : "Закрепить вверху");
+                card.Controls.Add(btnPin);
             }
             else
             {
@@ -1467,8 +1440,8 @@ namespace PasteImageAsFile
                 Button btnView = new Button
                 {
                     Text = "👁",
-                    Location = new Point(card.Width - 60, 6),
-                    Size = new Size(28, 26),
+                    Location = new Point(card.Width - 62, 6),
+                    Size = new Size(26, 26),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.Transparent,
                     ForeColor = ThemeHelper.TextSecondary,
@@ -1478,8 +1451,10 @@ namespace PasteImageAsFile
                     Tag = "c1_r1"
                 };
                 btnView.FlatAppearance.BorderSize = 0;
-                btnView.MouseEnter += (s, e) => { btnView.BackColor = ThemeHelper.ButtonHover; btnView.ForeColor = ThemeHelper.TextPrimary; };
-                btnView.MouseLeave += (s, e) => { btnView.BackColor = Color.Transparent; btnView.ForeColor = ThemeHelper.TextSecondary; };
+                btnView.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+                btnView.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
+                btnView.MouseEnter += (s, e) => { btnView.ForeColor = ThemeHelper.TextPrimary; };
+                btnView.MouseLeave += (s, e) => { btnView.ForeColor = ThemeHelper.TextSecondary; };
                 btnView.Click += (s, e) => ItemViewerForm.ShowViewer(item);
                 toolTip.SetToolTip(btnView, "Просмотр содержимого");
                 card.Controls.Add(btnView);
@@ -1488,19 +1463,21 @@ namespace PasteImageAsFile
                 Button btnRemove = new Button
                 {
                     Text = "✕",
-                    Location = new Point(card.Width - 30, 6),
-                    Size = new Size(28, 26),
+                    Location = new Point(card.Width - 32, 6),
+                    Size = new Size(26, 26),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.Transparent,
                     ForeColor = ThemeHelper.TextSecondary,
-                    Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                    Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                     Cursor = Cursors.Hand,
                     TabStop = false,
                     Tag = "c2_r1"
                 };
                 btnRemove.FlatAppearance.BorderSize = 0;
-                btnRemove.MouseEnter += (s, e) => { btnRemove.BackColor = Color.FromArgb(196, 43, 28); btnRemove.ForeColor = Color.White; };
-                btnRemove.MouseLeave += (s, e) => { btnRemove.BackColor = Color.Transparent; btnRemove.ForeColor = ThemeHelper.TextSecondary; };
+                btnRemove.FlatAppearance.MouseOverBackColor = Color.FromArgb(196, 43, 28);
+                btnRemove.FlatAppearance.MouseDownBackColor = Color.FromArgb(160, 30, 20);
+                btnRemove.MouseEnter += (s, e) => { btnRemove.ForeColor = Color.White; };
+                btnRemove.MouseLeave += (s, e) => { btnRemove.ForeColor = ThemeHelper.TextSecondary; };
                 btnRemove.Click += (s, e) => {
                     ClipboardHistoryManager.Instance.ToggleSuperHub(item.Id);
                     RefreshItems();
@@ -1512,8 +1489,8 @@ namespace PasteImageAsFile
                 Button btnPaste = new Button
                 {
                     Text = "📥",
-                    Location = new Point(card.Width - 60, 36),
-                    Size = new Size(28, 26),
+                    Location = new Point(card.Width - 62, 36),
+                    Size = new Size(26, 26),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.Transparent,
                     ForeColor = ThemeHelper.TextSecondary,
@@ -1523,8 +1500,10 @@ namespace PasteImageAsFile
                     Tag = "c1_r2"
                 };
                 btnPaste.FlatAppearance.BorderSize = 0;
-                btnPaste.MouseEnter += (s, e) => { btnPaste.BackColor = ThemeHelper.ButtonHover; btnPaste.ForeColor = ThemeHelper.Accent; };
-                btnPaste.MouseLeave += (s, e) => { btnPaste.BackColor = Color.Transparent; btnPaste.ForeColor = ThemeHelper.TextSecondary; };
+                btnPaste.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+                btnPaste.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
+                btnPaste.MouseEnter += (s, e) => { btnPaste.ForeColor = ThemeHelper.Accent; };
+                btnPaste.MouseLeave += (s, e) => { btnPaste.ForeColor = ThemeHelper.TextSecondary; };
                 btnPaste.Click += (s, e) => PasteItem(item);
                 toolTip.SetToolTip(btnPaste, "Вставить в активное окно");
                 card.Controls.Add(btnPaste);
@@ -1532,8 +1511,8 @@ namespace PasteImageAsFile
                 // 4. c2_r2: Запуск в Windows [▷] ИЛИ Меню действий [···]
                 Button btnAction = new Button
                 {
-                    Location = new Point(card.Width - 30, 36),
-                    Size = new Size(28, 26),
+                    Location = new Point(card.Width - 32, 36),
+                    Size = new Size(26, 26),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.Transparent,
                     ForeColor = ThemeHelper.TextSecondary,
@@ -1542,6 +1521,8 @@ namespace PasteImageAsFile
                     Tag = "c2_r2"
                 };
                 btnAction.FlatAppearance.BorderSize = 0;
+                btnAction.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+                btnAction.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
                 if (hasLaunch)
                 {
                     btnAction.Text = "▷";
@@ -1560,15 +1541,15 @@ namespace PasteImageAsFile
                     };
                     toolTip.SetToolTip(btnAction, "Меню действий");
                 }
-                btnAction.MouseEnter += (s, e) => { btnAction.BackColor = ThemeHelper.ButtonHover; btnAction.ForeColor = ThemeHelper.TextPrimary; };
-                btnAction.MouseLeave += (s, e) => { btnAction.BackColor = Color.Transparent; btnAction.ForeColor = ThemeHelper.TextSecondary; };
+                btnAction.MouseEnter += (s, e) => { btnAction.ForeColor = ThemeHelper.TextPrimary; };
+                btnAction.MouseLeave += (s, e) => { btnAction.ForeColor = ThemeHelper.TextSecondary; };
                 card.Controls.Add(btnAction);
             }
 
             // Контентная часть карточки:
-            // Кнопки справа занимают 60px + 6px отступ, поэтому максимальная ширина текста:
             int textLeft = 14;
             int textWidth = Math.Max(40, card.Width - 70);
+            List<Control> infoControls = new List<Control>();
 
             if (item.Type == ClipboardItemType.Image && SafeFileExists(item.ImagePath))
             {
@@ -1591,9 +1572,10 @@ namespace PasteImageAsFile
                 }
                 catch {}
                 card.Controls.Add(pic);
+                infoControls.Add(pic);
 
                 textLeft = 74;
-                textWidth = Math.Max(40, card.Width - textLeft - 66);
+                textWidth = Math.Max(40, card.Width - textLeft - 70);
 
                 Label lblImgTitle = new Label
                 {
@@ -1621,6 +1603,8 @@ namespace PasteImageAsFile
 
                 card.Controls.Add(lblImgTitle);
                 card.Controls.Add(lblImgSub);
+                infoControls.Add(lblImgTitle);
+                infoControls.Add(lblImgSub);
             }
             else if (item.Type == ClipboardItemType.Files)
             {
@@ -1638,9 +1622,10 @@ namespace PasteImageAsFile
                     Cursor = Cursors.Hand
                 };
                 card.Controls.Add(pic);
+                infoControls.Add(pic);
 
                 textLeft = 54;
-                textWidth = Math.Max(40, card.Width - textLeft - 66);
+                textWidth = Math.Max(40, card.Width - textLeft - 70);
 
                 Label lblFileTitle = new Label
                 {
@@ -1670,6 +1655,8 @@ namespace PasteImageAsFile
 
                 card.Controls.Add(lblFileTitle);
                 card.Controls.Add(lblFileSub);
+                infoControls.Add(lblFileTitle);
+                infoControls.Add(lblFileSub);
             }
             else
             {
@@ -1678,7 +1665,7 @@ namespace PasteImageAsFile
                 if (line1.Length > 90) line1 = line1.Substring(0, 90) + "...";
 
                 textLeft = 14;
-                textWidth = Math.Max(40, card.Width - textLeft - 66);
+                textWidth = Math.Max(40, card.Width - textLeft - 70);
 
                 Label lblTxtMain = new Label
                 {
@@ -1705,6 +1692,8 @@ namespace PasteImageAsFile
 
                 card.Controls.Add(lblTxtMain);
                 card.Controls.Add(lblTxtSub);
+                infoControls.Add(lblTxtMain);
+                infoControls.Add(lblTxtSub);
             }
 
             // Наведение и события клика/двойного клика
@@ -1713,6 +1702,8 @@ namespace PasteImageAsFile
 
             Action<Control> attachEvents = null;
             attachEvents = (c) => {
+                if (c is Button) return; // Изолируем кнопки карточки: hover и toolTip работают нативно
+
                 c.MouseEnter += (s, e) => { card.BackColor = ThemeHelper.CardHover; };
                 c.MouseLeave += (s, e) => { card.BackColor = ThemeHelper.CardBackground; };
 
@@ -1780,7 +1771,10 @@ namespace PasteImageAsFile
             string tip = isHub
                 ? "Клик: скопировать в буфер\nЗажать и потянуть: перетащить наружу\nПравый клик: меню действий"
                 : "Клик: скопировать в буфер\nДвойной клик: открыть файл\nПравый клик: меню действий";
-            toolTip.SetToolTip(card, tip);
+            foreach (Control ic in infoControls)
+            {
+                toolTip.SetToolTip(ic, tip);
+            }
 
             return card;
         }
@@ -2078,8 +2072,12 @@ namespace PasteImageAsFile
             {
                 if (currentInstance != null && !currentInstance.IsDisposed)
                 {
+                    bool wasVisible = currentInstance.Visible;
                     currentInstance.CloseFlyout();
-                    return;
+                    if (wasVisible)
+                    {
+                        return;
+                    }
                 }
 
                 Screen scr = Screen.FromPoint(cursor);

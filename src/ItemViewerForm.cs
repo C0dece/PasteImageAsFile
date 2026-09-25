@@ -94,8 +94,10 @@ namespace PasteImageAsFile
             this.Text = "Просмотр - PasteImageAsFile";
 
             toolTip = new ToolTip();
-            toolTip.AutoPopDelay = 5000;
-            toolTip.InitialDelay = 300;
+            toolTip.AutoPopDelay = 6000;
+            toolTip.InitialDelay = 200;
+            toolTip.ReshowDelay = 100;
+            toolTip.ShowAlways = true;
 
             this.Shown += (s, e) => ApplyWindowStyles();
             ThemeHelper.ThemeChanged += () => {
@@ -1031,8 +1033,8 @@ namespace PasteImageAsFile
                 TabStop = false
             };
             btn.FlatAppearance.BorderSize = 0;
-            btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(45, 45, 45);
-            btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(60, 60, 60);
+            btn.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+            btn.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
             btn.MouseEnter += (s, e) => btn.ForeColor = ThemeHelper.TextPrimary;
             btn.MouseLeave += (s, e) => btn.ForeColor = ThemeHelper.TextSecondary;
             toolTip.SetToolTip(btn, tip);
@@ -1055,8 +1057,8 @@ namespace PasteImageAsFile
             };
             btn.FlatAppearance.BorderSize = 1;
             btn.FlatAppearance.BorderColor = ThemeHelper.CardBorder;
-            btn.MouseEnter += (s, e) => btn.BackColor = ThemeHelper.ButtonHover;
-            btn.MouseLeave += (s, e) => btn.BackColor = ThemeHelper.CardBackground;
+            btn.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+            btn.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
             toolTip.SetToolTip(btn, tip);
             return btn;
         }

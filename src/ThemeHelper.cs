@@ -165,5 +165,10 @@ namespace PasteImageAsFile
         {
             get { return IsDarkTheme() ? Color.FromArgb(65, 65, 65) : Color.FromArgb(215, 215, 215); }
         }
+
+        public static Color ButtonPressed
+        {
+            get { return ButtonActive; }
+        }
     }
 }

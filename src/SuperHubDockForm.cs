@@ -929,10 +929,8 @@ namespace PasteImageAsFile
                 TabStop = false
             };
             btn.FlatAppearance.BorderSize = 0;
-            btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(45, 45, 45);
-            btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(60, 60, 60);
-            btn.MouseEnter += (s, e) => btn.BackColor = ThemeHelper.ButtonHover;
-            btn.MouseLeave += (s, e) => btn.BackColor = Color.Transparent;
+            btn.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+            btn.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
             toolTip.SetToolTip(btn, tip);
             return btn;
         }
@@ -1251,6 +1249,26 @@ namespace PasteImageAsFile
             }
         }
 
+        private static void SafeDisposeControls(Control parent)
+        {
+            if (parent == null) return;
+            for (int i = parent.Controls.Count - 1; i >= 0; i--)
+            {
+                try
+                {
+                    Control c = parent.Controls[i];
+                    parent.Controls.RemoveAt(i);
+                    var pic = c as PictureBox;
+                    if (pic != null && pic.Image != null)
+                    {
+                        try { pic.Image.Dispose(); pic.Image = null; } catch {}
+                    }
+                    c.Dispose();
+                }
+                catch {}
+            }
+        }
+
         public void RefreshItems()
         {
             if (!isExpanded) return;
@@ -1286,9 +1304,8 @@ namespace PasteImageAsFile
             UpdateTabsVisual();
 
             LayoutHeaderControls();
-
             cardsList.SuspendLayout();
-            cardsList.Controls.Clear();
+            SafeDisposeControls(cardsList);
             scrollOffset = 0;
 
             bool isHorizontal = IsHorizontalPosition();
@@ -1530,7 +1547,6 @@ namespace PasteImageAsFile
             attachEvents(card);
 
             string cardTip = "Клик: скопировать в буфер\nДвойной клик: открыть\nЗажать и потянуть: перетащить наружу (" + (Config.SuperHubDragMode == "Move" ? "Перемещение" : "Копирование") + ")";
-            toolTip.SetToolTip(card, cardTip);
             toolTip.SetToolTip(lblName, cardTip);
             toolTip.SetToolTip(lblSub, cardTip);
             toolTip.SetToolTip(pic, cardTip);
@@ -1713,7 +1729,6 @@ namespace PasteImageAsFile
             attachEvents(card);
 
             string cardTip = "Клик: скопировать в буфер\nДвойной клик: открыть\nЗажать и потянуть: перетащить наружу (" + (Config.SuperHubDragMode == "Move" ? "Перемещение" : "Копирование") + ")";
-            toolTip.SetToolTip(card, cardTip);
             toolTip.SetToolTip(lblName, cardTip);
             toolTip.SetToolTip(lblSub, cardTip);
             return card;
@@ -1782,38 +1797,34 @@ namespace PasteImageAsFile
             card.Controls.Add(pic);
 
             // Сетка кнопок действий 2x2 справа (24x24)
-            // Верх: [📥] и [📌]
-            Button btnPaste = CreateToolButton("📥", card.Width - 54, 4, 24, 24, "Вставить в активное окно (Ctrl+V)");
+            // Верх: [📥] и [✕]
+            Button btnPaste = CreateToolButton("📥", card.Width - 58, 6, 24, 24, "Вставить в активное окно (Ctrl+V)");
             btnPaste.Click += (s, e) => PasteItem(item);
             card.Controls.Add(btnPaste);
 
-            Button btnPinItem = CreateToolButton("📌", card.Width - 26, 4, 24, 24, item.IsPinned ? "Открепить" : "Закрепить вверху");
+            Button btnDelete = CreateToolButton("✕", card.Width - 30, 6, 24, 24, "Удалить элемент из истории буфера");
+            btnDelete.FlatAppearance.MouseOverBackColor = Color.FromArgb(196, 43, 28);
+            btnDelete.FlatAppearance.MouseDownBackColor = Color.FromArgb(160, 30, 20);
+            btnDelete.MouseEnter += (s, e) => { btnDelete.ForeColor = Color.White; };
+            btnDelete.MouseLeave += (s, e) => { btnDelete.ForeColor = ThemeHelper.TextSecondary; };
+            btnDelete.Click += (s, e) => {
+                ClipboardHistoryManager.Instance.DeleteItem(item.Id);
+                RefreshItems();
+            };
+            card.Controls.Add(btnDelete);
+
+            // Низ: [👁] и [📌]
+            Button btnView = CreateToolButton("👁", card.Width - 58, 34, 24, 24, "Просмотр содержимого");
+            btnView.Click += (s, e) => ItemViewerForm.ShowViewer(item, targetPath);
+            card.Controls.Add(btnView);
+
+            Button btnPinItem = CreateToolButton("📌", card.Width - 30, 34, 24, 24, item.IsPinned ? "Открепить" : "Закрепить вверху");
             btnPinItem.ForeColor = item.IsPinned ? ThemeHelper.Accent : ThemeHelper.TextSecondary;
             btnPinItem.Click += (s, e) => {
                 ClipboardHistoryManager.Instance.TogglePin(item.Id);
                 RefreshItems();
             };
             card.Controls.Add(btnPinItem);
-
-            // Низ: [👁] и [▷] или [···]
-            Button btnView = CreateToolButton("👁", card.Width - 54, 30, 24, 24, "Просмотр содержимого");
-            btnView.Click += (s, e) => ItemViewerForm.ShowViewer(item, targetPath);
-            card.Controls.Add(btnView);
-
-            Button btnAction;
-            if (!string.IsNullOrEmpty(targetPath) && (SafeFileExists(targetPath) || SafeDirectoryExists(targetPath)))
-            {
-                btnAction = CreateToolButton("▷", card.Width - 26, 30, 24, 24, "Открыть в ассоциированной программе");
-                btnAction.Click += (s, e) => LaunchFile(targetPath);
-            }
-            else
-            {
-                btnAction = CreateToolButton("···", card.Width - 26, 30, 24, 24, "Меню действий");
-                btnAction.Click += (s, e) => {
-                    if (card.ContextMenu != null) card.ContextMenu.Show(btnAction, new Point(0, btnAction.Height));
-                };
-            }
-            card.Controls.Add(btnAction);
 
             // Заголовок
             Label lblName = new Label
@@ -1924,7 +1935,6 @@ namespace PasteImageAsFile
             attachEvents(card);
 
             string cardTip = "Клик: " + (Config.ClipboardClickAction == "Paste" ? "вставить" : "скопировать") + "\nДвойной клик: открыть\nЗажать и потянуть: перетащить (Drag & Drop)";
-            toolTip.SetToolTip(card, cardTip);
             toolTip.SetToolTip(lblName, cardTip);
             toolTip.SetToolTip(lblSub, cardTip);
             toolTip.SetToolTip(pic, cardTip);
@@ -1993,8 +2003,20 @@ namespace PasteImageAsFile
             else pic.Image = SystemIcons.Application.ToBitmap();
             card.Controls.Add(pic);
 
-            // Кнопка закрепления [📌] (24x24) в правом верхнем углу
-            Button btnPinItem = CreateToolButton("📌", card.Width - 28, 4, 24, 24, item.IsPinned ? "Открепить" : "Закрепить");
+            // Кнопка удаления [✕] (24x24) в правом верхнем углу
+            Button btnDelete = CreateToolButton("✕", card.Width - 30, 4, 24, 24, "Удалить запись из истории буфера");
+            btnDelete.FlatAppearance.MouseOverBackColor = Color.FromArgb(196, 43, 28);
+            btnDelete.FlatAppearance.MouseDownBackColor = Color.FromArgb(160, 30, 20);
+            btnDelete.MouseEnter += (s, e) => { btnDelete.ForeColor = Color.White; };
+            btnDelete.MouseLeave += (s, e) => { btnDelete.ForeColor = ThemeHelper.TextSecondary; };
+            btnDelete.Click += (s, e) => {
+                ClipboardHistoryManager.Instance.DeleteItem(item.Id);
+                RefreshItems();
+            };
+            card.Controls.Add(btnDelete);
+
+            // Кнопка закрепления [📌] (24x24) слева от кнопки удаления
+            Button btnPinItem = CreateToolButton("📌", card.Width - 58, 4, 24, 24, item.IsPinned ? "Открепить" : "Закрепить");
             btnPinItem.ForeColor = item.IsPinned ? ThemeHelper.Accent : ThemeHelper.TextSecondary;
             btnPinItem.Click += (s, e) => {
                 ClipboardHistoryManager.Instance.TogglePin(item.Id);
@@ -2092,7 +2114,6 @@ namespace PasteImageAsFile
             attachEvents(card);
 
             string cardTip = "Клик: " + (Config.ClipboardClickAction == "Paste" ? "вставить" : "скопировать") + "\nДвойной клик: открыть\nЗажать и потянуть: перетащить (Drag & Drop)";
-            toolTip.SetToolTip(card, cardTip);
             toolTip.SetToolTip(lblName, cardTip);
             toolTip.SetToolTip(lblSub, cardTip);
             return card;

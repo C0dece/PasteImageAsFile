@@ -326,6 +326,23 @@ namespace PasteImageAsFile
 
                 if (ShellIntegration.IsDaemonRunning())
                 {
+                    // 1. Сигнализируем работающему демону через именованный Event ядра Windows
+                    try
+                    {
+                        using (var ev = EventWaitHandle.OpenExisting(ClipboardListenerWindow.FlyoutEventName))
+                        {
+                            ev.Set();
+                            Logger.Log("Signaled " + ClipboardListenerWindow.FlyoutEventName + " successfully");
+                            return;
+                        }
+                    }
+                    catch (WaitHandleCannotBeOpenedException) {}
+                    catch (Exception exSignal)
+                    {
+                        Logger.Log("Event open failed: " + exSignal.Message);
+                    }
+
+                    // 2. Fallback: оконное широковещательное сообщение
                     uint wmMsg = RegisterWindowMessage(ClipboardListenerWindow.FLYOUT_MSG_NAME);
                     if (wmMsg != 0)
                     {
@@ -333,22 +350,6 @@ namespace PasteImageAsFile
                         Logger.Log("Broadcasted WM_SHOW_FLYOUT_MSG to running daemon");
                         return;
                     }
-                }
-
-                // Пытаемся разбудить работающий демон через именованный Event
-                try
-                {
-                    using (var ev = EventWaitHandle.OpenExisting(ClipboardListenerWindow.FlyoutEventName))
-                    {
-                        ev.Set();
-                        Logger.Log("Signaled " + ClipboardListenerWindow.FlyoutEventName + " successfully");
-                        return;
-                    }
-                }
-                catch (WaitHandleCannotBeOpenedException) {}
-                catch (Exception exSignal)
-                {
-                    Logger.Log("Event open failed: " + exSignal.Message);
                 }
 
                 DesktopHelper.POINT cliPt;
