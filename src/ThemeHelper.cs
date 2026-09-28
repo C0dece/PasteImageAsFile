@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Windows.Forms;
 using Microsoft.Win32;
 
 namespace PasteImageAsFile
@@ -108,17 +109,60 @@ namespace PasteImageAsFile
 
         public static Color Accent
         {
-            get { return IsDarkTheme() ? Color.FromArgb(96, 205, 255) : Color.FromArgb(0, 103, 192); }
+            get
+            {
+                string custom = Config.AccentColor;
+                if (!string.IsNullOrEmpty(custom))
+                {
+                    try
+                    {
+                        return ColorTranslator.FromHtml(custom);
+                    }
+                    catch {}
+                }
+                return IsDarkTheme() ? Color.FromArgb(96, 205, 255) : Color.FromArgb(0, 103, 192);
+            }
         }
 
         public static Color AccentHover
         {
-            get { return IsDarkTheme() ? Color.FromArgb(120, 215, 255) : Color.FromArgb(0, 90, 170); }
+            get
+            {
+                Color baseCol = Accent;
+                if (IsDarkTheme())
+                {
+                    int r = Math.Min(255, baseCol.R + 25);
+                    int g = Math.Min(255, baseCol.G + 25);
+                    int b = Math.Min(255, baseCol.B + 25);
+                    return Color.FromArgb(r, g, b);
+                }
+                else
+                {
+                    int r = Math.Max(0, baseCol.R - 25);
+                    int g = Math.Max(0, baseCol.G - 25);
+                    int b = Math.Max(0, baseCol.B - 25);
+                    return Color.FromArgb(r, g, b);
+                }
+            }
         }
 
         public static Color AccentBackground
         {
-            get { return IsDarkTheme() ? Color.FromArgb(30, 60, 90) : Color.FromArgb(220, 238, 255); }
+            get
+            {
+                Color baseCol = Accent;
+                if (IsDarkTheme())
+                {
+                    return Color.FromArgb(Math.Min(80, baseCol.R / 3 + 20), Math.Min(80, baseCol.G / 3 + 20), Math.Min(90, baseCol.B / 3 + 30));
+                }
+                else
+                {
+                    int r = Math.Min(255, baseCol.R + (255 - baseCol.R) * 4 / 5);
+                    int g = Math.Min(255, baseCol.G + (255 - baseCol.G) * 4 / 5);
+                    int b = Math.Min(255, baseCol.B + (255 - baseCol.B) * 4 / 5);
+                    return Color.FromArgb(r, g, b);
+                }
+            }
         }
 
         public static Color ScrollBarTrack
@@ -169,6 +213,62 @@ namespace PasteImageAsFile
         public static Color ButtonPressed
         {
             get { return ButtonActive; }
+        }
+
+        public static void ApplyButtonStyle(Button btn, bool isActive = false)
+        {
+            if (btn == null) return;
+            btn.FlatStyle = FlatStyle.Flat;
+            btn.FlatAppearance.BorderSize = 0;
+            btn.FlatAppearance.MouseOverBackColor = ButtonHover;
+            btn.FlatAppearance.MouseDownBackColor = ButtonPressed;
+            if (isActive)
+            {
+                btn.BackColor = AccentBackground;
+                btn.ForeColor = Accent;
+            }
+        }
+
+        public static ToolTip CreateFluentToolTip()
+        {
+            var tt = new ToolTip();
+            tt.AutoPopDelay = 6000;
+            tt.InitialDelay = 300;
+            tt.ReshowDelay = 150;
+            tt.OwnerDraw = true;
+
+            tt.Draw += (s, e) => {
+                Graphics g = e.Graphics;
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+                bool isDark = IsDarkTheme();
+                Color bg = isDark ? Color.FromArgb(43, 43, 43) : Color.FromArgb(250, 250, 250);
+                Color border = isDark ? Color.FromArgb(70, 70, 70) : Color.FromArgb(205, 205, 205);
+                Color textCol = isDark ? Color.FromArgb(240, 240, 240) : Color.FromArgb(25, 25, 25);
+
+                Rectangle rect = new Rectangle(0, 0, e.Bounds.Width - 1, e.Bounds.Height - 1);
+                using (var b = new SolidBrush(bg))
+                {
+                    g.FillRectangle(b, e.Bounds);
+                }
+                using (var p = new Pen(border, 1))
+                {
+                    g.DrawRectangle(p, rect);
+                }
+
+                TextRenderer.DrawText(g, e.ToolTipText, new Font("Segoe UI", 9f),
+                    new Rectangle(8, 4, e.Bounds.Width - 16, e.Bounds.Height - 8),
+                    textCol, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+            };
+
+            tt.Popup += (s, e) => {
+                string text = tt.GetToolTip(e.AssociatedControl);
+                Size sz = TextRenderer.MeasureText(text, new Font("Segoe UI", 9f));
+                e.ToolTipSize = new Size(sz.Width + 18, Math.Max(24, sz.Height + 10));
+            };
+
+            return tt;
         }
     }
 }

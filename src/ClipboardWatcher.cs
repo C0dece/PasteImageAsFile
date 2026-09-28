@@ -14,6 +14,7 @@ namespace PasteImageAsFile
     {
         const int WM_CLIPBOARDUPDATE = 0x031D;
         public const int WM_SHOW_FLYOUT = 0x042A;
+        public const int WM_SHOW_SUPERHUB = 0x042B;
 
         [DllImport("user32.dll", SetLastError = true)]
         static extern bool AddClipboardFormatListener(IntPtr hwnd);
@@ -33,12 +34,19 @@ namespace PasteImageAsFile
         public const string FLYOUT_MSG_NAME = "PasteImageAsFile_ShowFlyout_Message_v1";
         public static readonly uint WM_SHOW_FLYOUT_MSG = RegisterWindowMessage(FLYOUT_MSG_NAME);
 
+        public const string SUPERHUB_MSG_NAME = "PasteImageAsFile_ShowSuperHub_Message_v1";
+        public static readonly uint WM_SHOW_SUPERHUB_MSG = RegisterWindowMessage(SUPERHUB_MSG_NAME);
+
         [DllImport("user32.dll", SetLastError = true)]
         static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
         public const string FlyoutEventName = "PasteImageAsFile_ShowFlyout_Event_v1";
         private EventWaitHandle flyoutEvent;
         private RegisteredWaitHandle registeredWait;
+
+        public const string SuperHubEventName = "PasteImageAsFile_ShowSuperHub_Event_v1";
+        private EventWaitHandle superHubEvent;
+        private RegisteredWaitHandle registeredSuperHubWait;
 
         public string CacheDirectory { get; private set; }
         private string lastAugmentedFile = null;
@@ -74,10 +82,20 @@ namespace PasteImageAsFile
                     }
                 }, null, -1, false);
                 Logger.Log("Registered wait for " + FlyoutEventName);
+
+                bool createdSuperHub;
+                superHubEvent = new EventWaitHandle(false, EventResetMode.AutoReset, SuperHubEventName, out createdSuperHub);
+                registeredSuperHubWait = ThreadPool.RegisterWaitForSingleObject(superHubEvent, (state, timedOut) => {
+                    if (!timedOut)
+                    {
+                        PostMessage(this.Handle, unchecked((uint)WM_SHOW_SUPERHUB), IntPtr.Zero, IntPtr.Zero);
+                    }
+                }, null, -1, false);
+                Logger.Log("Registered wait for " + SuperHubEventName);
             }
             catch (Exception ex)
             {
-                Logger.Log("Error initializing flyoutEvent: " + ex.Message);
+                Logger.Log("Error initializing IPC events: " + ex.Message);
             }
 
             InitDesktopWatcher();
@@ -156,6 +174,30 @@ namespace PasteImageAsFile
                 catch (Exception ex)
                 {
                     Logger.Log("Error showing flyout from WM_SHOW_FLYOUT: " + ex.Message);
+                }
+                return;
+            }
+
+            if (m.Msg == (int)WM_SHOW_SUPERHUB_MSG || m.Msg == WM_SHOW_SUPERHUB)
+            {
+                Logger.Log("WM_SHOW_SUPERHUB message received");
+                try
+                {
+                    IntPtr prevFg = GetForegroundWindow();
+                    DesktopHelper.POINT curPt;
+                    DesktopHelper.TryGetCursorPosition(out curPt);
+                    Point pt = new Point(curPt.x, curPt.y);
+                    Screen scr = Screen.FromPoint(pt);
+                    if (prevFg == IntPtr.Zero || Program.IsTaskbarOrTrayWindow(prevFg))
+                    {
+                        IntPtr userWnd = Program.FindLastActiveUserWindow(scr);
+                        if (userWnd != IntPtr.Zero) prevFg = userWnd;
+                    }
+                    ClipboardFlyoutForm.ShowDockFlyout(scr, Config.SuperHubPosition, prevFg, true);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log("Error showing superhub from WM_SHOW_SUPERHUB: " + ex.Message);
                 }
                 return;
             }
@@ -430,6 +472,16 @@ namespace PasteImageAsFile
             {
                 try { flyoutEvent.Close(); } catch {}
                 flyoutEvent = null;
+            }
+            if (registeredSuperHubWait != null)
+            {
+                try { registeredSuperHubWait.Unregister(null); } catch {}
+                registeredSuperHubWait = null;
+            }
+            if (superHubEvent != null)
+            {
+                try { superHubEvent.Close(); } catch {}
+                superHubEvent = null;
             }
             RemoveClipboardFormatListener(this.Handle);
             this.DestroyHandle();

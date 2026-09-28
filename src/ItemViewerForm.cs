@@ -93,10 +93,7 @@ namespace PasteImageAsFile
             this.ShowIcon = false;
             this.Text = "Просмотр - PasteImageAsFile";
 
-            toolTip = new ToolTip();
-            toolTip.AutoPopDelay = 6000;
-            toolTip.InitialDelay = 200;
-            toolTip.ReshowDelay = 100;
+            toolTip = ThemeHelper.CreateFluentToolTip();
             toolTip.ShowAlways = true;
 
             this.Shown += (s, e) => ApplyWindowStyles();

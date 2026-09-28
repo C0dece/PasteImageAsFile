@@ -349,6 +349,7 @@ namespace PasteImageAsFile
                     if (it.Id == id)
                     {
                         it.IsPinned = !it.IsPinned;
+                        it.IsInSuperHub = it.IsPinned;
                         Save();
                         break;
                     }
@@ -365,6 +366,7 @@ namespace PasteImageAsFile
                     if (it.Id == id)
                     {
                         it.IsInSuperHub = !it.IsInSuperHub;
+                        it.IsPinned = it.IsInSuperHub;
                         Save();
                         break;
                     }

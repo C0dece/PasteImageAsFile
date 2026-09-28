@@ -146,6 +146,12 @@ namespace PasteImageAsFile
                     Thread.Sleep(600);
                     return;
                 }
+                if (cmd == "--superhub" || cmd == "--hub" || cmd == "-hub")
+                {
+                    ShowSuperHubShelf();
+                    Thread.Sleep(600);
+                    return;
+                }
                 if (cmd == "--save" || cmd == "-s")
                 {
                     string targetFolder = args.Length > 1 ? args[1] : "";
@@ -364,6 +370,66 @@ namespace PasteImageAsFile
             }
         }
 
+        public static void ShowSuperHubShelf()
+        {
+            Logger.Log("ShowSuperHubShelf invoked");
+            try
+            {
+                if (watcherWindow != null || (mainForm != null && !mainForm.IsDisposed))
+                {
+                    DesktopHelper.POINT curPt;
+                    DesktopHelper.TryGetCursorPosition(out curPt);
+                    Point pt = new Point(curPt.x, curPt.y);
+                    Screen scr = Screen.FromPoint(pt);
+                    IntPtr prevFg = GetForegroundWindow();
+                    if (prevFg == IntPtr.Zero || IsTaskbarOrTrayWindow(prevFg))
+                    {
+                        IntPtr userWnd = FindLastActiveUserWindow(scr);
+                        if (userWnd != IntPtr.Zero) prevFg = userWnd;
+                    }
+                    ClipboardFlyoutForm.ShowDockFlyout(scr, Config.SuperHubPosition, prevFg, true);
+                    return;
+                }
+
+                if (ShellIntegration.IsDaemonRunning())
+                {
+                    try
+                    {
+                        using (var ev = EventWaitHandle.OpenExisting(ClipboardListenerWindow.SuperHubEventName))
+                        {
+                            ev.Set();
+                            Logger.Log("Signaled " + ClipboardListenerWindow.SuperHubEventName + " successfully");
+                            return;
+                        }
+                    }
+                    catch (WaitHandleCannotBeOpenedException) {}
+                    catch (Exception exSignal)
+                    {
+                        Logger.Log("SuperHub Event open failed: " + exSignal.Message);
+                    }
+
+                    uint wmMsg = RegisterWindowMessage(ClipboardListenerWindow.SUPERHUB_MSG_NAME);
+                    if (wmMsg != 0)
+                    {
+                        PostMessage((IntPtr)0xffff, wmMsg, IntPtr.Zero, IntPtr.Zero);
+                        Logger.Log("Broadcasted WM_SHOW_SUPERHUB_MSG to running daemon");
+                        return;
+                    }
+                }
+
+                DesktopHelper.POINT cliPt;
+                DesktopHelper.TryGetCursorPosition(out cliPt);
+                Screen defScr = Screen.FromPoint(new Point(cliPt.x, cliPt.y));
+                IntPtr fg = GetForegroundWindow();
+                ClipboardFlyoutForm.ShowDockFlyout(defScr, Config.SuperHubPosition, fg, true);
+                Application.Run();
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("ShowSuperHubShelf error: " + ex.ToString());
+            }
+        }
+
         public static void SendNativeWinV(bool fromTray = false)
         {
             if (Interlocked.CompareExchange(ref isShowingHistory, 1, 0) != 0)
@@ -500,9 +566,8 @@ namespace PasteImageAsFile
 
             try
             {
-                var dock = SuperHubDockForm.Instance;
-                dock.Show();
-                Logger.Log("SuperHubDockForm initialized and shown");
+                SuperHubDockForm.SyncAllDocks();
+                Logger.Log("SuperHub docks initialized and shown");
             }
             catch (Exception ex)
             {
@@ -510,7 +575,7 @@ namespace PasteImageAsFile
             }
 
             Logger.Log("Entering Application.Run() for daemon");
-            Application.Run();
+            Application.Run(new ApplicationContext());
             Logger.Log("Exited Application.Run() for daemon");
 
             GC.KeepAlive(singleInstanceMutex);

@@ -101,6 +101,33 @@ namespace PasteImageAsFile
             set { SetString("SuperHubPosition", value); }
         }
 
+        public static string SuperHubScreenMode
+        {
+            get { return GetString("SuperHubScreenMode", "All"); }
+            set { SetString("SuperHubScreenMode", value); }
+        }
+
+        public static string SuperHubTargetScreen
+        {
+            get { return GetString("SuperHubTargetScreen", ""); }
+            set { SetString("SuperHubTargetScreen", value ?? ""); }
+        }
+
+        public static string GetScreenPosition(string screenDevice, string defaultPos = null)
+        {
+            if (string.IsNullOrEmpty(defaultPos)) defaultPos = SuperHubPosition;
+            if (string.IsNullOrEmpty(screenDevice)) return defaultPos;
+            string cleanKey = "SuperHubPos_" + screenDevice.Replace("\\", "_").Replace(".", "_");
+            return GetString(cleanKey, defaultPos);
+        }
+
+        public static void SetScreenPosition(string screenDevice, string pos)
+        {
+            if (string.IsNullOrEmpty(screenDevice) || string.IsNullOrEmpty(pos)) return;
+            string cleanKey = "SuperHubPos_" + screenDevice.Replace("\\", "_").Replace(".", "_");
+            SetString(cleanKey, pos);
+        }
+
         public static string SuperHubDragMode
         {
             get { return GetString("SuperHubDragMode", "Copy"); }
@@ -113,16 +140,22 @@ namespace PasteImageAsFile
             set { SetString("ClipboardClickAction", value); }
         }
 
+        public static string AccentColor
+        {
+            get { return GetString("AccentColor", ""); }
+            set { SetString("AccentColor", value ?? ""); }
+        }
+
         public static int ClipboardFlyoutWidth
         {
-            get { return Math.Max(320, Math.Min(900, GetDword("ClipboardFlyoutWidth", 420))); }
-            set { SetDword("ClipboardFlyoutWidth", Math.Max(320, Math.Min(900, value))); }
+            get { return Math.Max(260, Math.Min(1600, GetDword("ClipboardFlyoutWidth", 360))); }
+            set { SetDword("ClipboardFlyoutWidth", Math.Max(260, Math.Min(1600, value))); }
         }
 
         public static int ClipboardFlyoutHeight
         {
-            get { return Math.Max(380, Math.Min(1000, GetDword("ClipboardFlyoutHeight", 580))); }
-            set { SetDword("ClipboardFlyoutHeight", Math.Max(380, Math.Min(1000, value))); }
+            get { return Math.Max(240, Math.Min(1400, GetDword("ClipboardFlyoutHeight", 480))); }
+            set { SetDword("ClipboardFlyoutHeight", Math.Max(240, Math.Min(1400, value))); }
         }
 
         public static int SuperHubSensitivity

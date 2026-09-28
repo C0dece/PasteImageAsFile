@@ -10,31 +10,185 @@ namespace PasteImageAsFile
 {
     public class FluentComboBox : ComboBox
     {
-        private const int WM_PAINT = 0x000F;
         private bool isHovered = false;
+        private System.Windows.Forms.Timer hoverCheckTimer;
 
         public FluentComboBox()
         {
+            SetStyle(ControlStyles.UserPaint | 
+                     ControlStyles.AllPaintingInWmPaint | 
+                     ControlStyles.OptimizedDoubleBuffer | 
+                     ControlStyles.ResizeRedraw, true);
+
             this.DrawMode = DrawMode.OwnerDrawFixed;
             this.DropDownStyle = ComboBoxStyle.DropDownList;
             this.FlatStyle = FlatStyle.Flat;
             this.ItemHeight = 22;
             this.Font = new Font("Segoe UI", 9f);
             this.Cursor = Cursors.Hand;
+
+            hoverCheckTimer = new System.Windows.Forms.Timer();
+            hoverCheckTimer.Interval = 50;
+            hoverCheckTimer.Tick += (s, e) => CheckHoverState();
+        }
+
+        private void CheckHoverState()
+        {
+            if (this.IsDisposed)
+            {
+                if (hoverCheckTimer != null) hoverCheckTimer.Stop();
+                return;
+            }
+
+            bool shouldHover = false;
+            if (this.Visible && this.Enabled)
+            {
+                Point cursorScreen = Cursor.Position;
+                Point clientPt = this.PointToClient(cursorScreen);
+                shouldHover = this.ClientRectangle.Contains(clientPt);
+            }
+
+            if (shouldHover != isHovered)
+            {
+                isHovered = shouldHover;
+                this.Invalidate();
+            }
+
+            if (!isHovered && hoverCheckTimer != null && hoverCheckTimer.Enabled)
+            {
+                hoverCheckTimer.Stop();
+            }
         }
 
         protected override void OnMouseEnter(EventArgs e)
         {
             base.OnMouseEnter(e);
-            isHovered = true;
-            this.Invalidate();
+            if (!isHovered)
+            {
+                isHovered = true;
+                this.Invalidate();
+            }
+            if (hoverCheckTimer != null && !hoverCheckTimer.Enabled)
+            {
+                hoverCheckTimer.Start();
+            }
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (!isHovered)
+            {
+                isHovered = true;
+                this.Invalidate();
+            }
+            if (hoverCheckTimer != null && !hoverCheckTimer.Enabled)
+            {
+                hoverCheckTimer.Start();
+            }
         }
 
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
-            isHovered = false;
+            CheckHoverState();
+        }
+
+        protected override void OnDropDown(EventArgs e)
+        {
+            base.OnDropDown(e);
+            if (hoverCheckTimer != null) hoverCheckTimer.Stop();
+            isHovered = true;
             this.Invalidate();
+        }
+
+        protected override void OnDropDownClosed(EventArgs e)
+        {
+            base.OnDropDownClosed(e);
+            CheckHoverState();
+        }
+
+        protected override void OnLostFocus(EventArgs e)
+        {
+            base.OnLostFocus(e);
+            isHovered = false;
+            if (hoverCheckTimer != null) hoverCheckTimer.Stop();
+            this.Invalidate();
+        }
+
+        protected override void OnLeave(EventArgs e)
+        {
+            base.OnLeave(e);
+            isHovered = false;
+            if (hoverCheckTimer != null) hoverCheckTimer.Stop();
+            this.Invalidate();
+        }
+
+        protected override void OnEnabledChanged(EventArgs e)
+        {
+            base.OnEnabledChanged(e);
+            if (!this.Enabled && isHovered)
+            {
+                isHovered = false;
+                if (hoverCheckTimer != null) hoverCheckTimer.Stop();
+                this.Invalidate();
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.None;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            bool isDark = ThemeHelper.IsDarkTheme();
+            Color bg = isDark ? Color.FromArgb(43, 43, 43) : Color.FromArgb(255, 255, 255);
+            Color borderColor = isDark
+                ? (isHovered ? ThemeHelper.Accent : Color.FromArgb(60, 60, 60))
+                : (isHovered ? ThemeHelper.Accent : Color.FromArgb(210, 210, 210));
+            Color textCol = isDark ? Color.FromArgb(240, 240, 240) : Color.FromArgb(25, 25, 25);
+            Color arrowColor = isHovered ? ThemeHelper.Accent : (isDark ? Color.FromArgb(200, 200, 200) : Color.FromArgb(100, 100, 100));
+
+            // 1. Фон контрола
+            using (var b = new SolidBrush(bg))
+            {
+                g.FillRectangle(b, 0, 0, this.Width, this.Height);
+            }
+
+            // 2. Отображаемый текст
+            string itemText = this.SelectedItem != null ? this.SelectedItem.ToString() : this.Text;
+            if (!string.IsNullOrEmpty(itemText))
+            {
+                Rectangle textRect = new Rectangle(8, 0, Math.Max(10, this.Width - 28), this.Height);
+                using (var textBrush = new SolidBrush(textCol))
+                using (var sf = new StringFormat
+                {
+                    LineAlignment = StringAlignment.Center,
+                    Alignment = StringAlignment.Near,
+                    Trimming = StringTrimming.EllipsisCharacter,
+                    FormatFlags = StringFormatFlags.NoWrap
+                })
+                {
+                    g.DrawString(itemText, this.Font, textBrush, textRect, sf);
+                }
+            }
+
+            // 3. Аккуратный шеврон с AntiAlias
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            int cx = this.Width - 14;
+            int cy = this.Height / 2;
+            using (var p = new Pen(arrowColor, 1.5f))
+            {
+                g.DrawLine(p, cx - 4, cy - 2, cx, cy + 2);
+                g.DrawLine(p, cx, cy + 2, cx + 4, cy - 2);
+            }
+
+            // 4. Тонкая четкая рамка 1px со SmoothingMode.None (без размытия или среза верхней грани)
+            g.SmoothingMode = SmoothingMode.None;
+            using (var p = new Pen(borderColor, 1))
+            {
+                g.DrawRectangle(p, 0, 0, this.Width - 1, this.Height - 1);
+            }
         }
 
         protected override void OnDrawItem(DrawItemEventArgs e)
@@ -76,50 +230,25 @@ namespace PasteImageAsFile
             }
         }
 
-        protected override void WndProc(ref Message m)
+        protected override void Dispose(bool disposing)
         {
-            base.WndProc(ref m);
-
-            if (m.Msg == WM_PAINT)
+            if (disposing)
             {
-                try
+                if (hoverCheckTimer != null)
                 {
-                    using (Graphics g = Graphics.FromHwnd(this.Handle))
-                    {
-                        g.SmoothingMode = SmoothingMode.AntiAlias;
-                        bool isDark = ThemeHelper.IsDarkTheme();
-
-                        Color borderColor = isDark
-                            ? (isHovered ? Color.FromArgb(90, 90, 90) : Color.FromArgb(60, 60, 60))
-                            : (isHovered ? Color.FromArgb(160, 160, 160) : Color.FromArgb(210, 210, 210));
-
-                        Color arrowColor = isDark ? Color.FromArgb(210, 210, 210) : Color.FromArgb(90, 90, 90);
-
-                        // 1. Аккуратный шеврон ∨ справа
-                        int cx = this.Width - 15;
-                        int cy = this.Height / 2;
-                        using (var p = new Pen(arrowColor, 1.5f))
-                        {
-                            g.DrawLine(p, cx - 4, cy - 2, cx, cy + 2);
-                            g.DrawLine(p, cx, cy + 2, cx + 4, cy - 2);
-                        }
-
-                        // 2. Тонкая аккуратная рамка 1px
-                        using (var p = new Pen(borderColor, 1))
-                        {
-                            g.DrawRectangle(p, 0, 0, this.Width - 1, this.Height - 1);
-                        }
-                    }
-                }
-                catch
-                {
+                    hoverCheckTimer.Stop();
+                    hoverCheckTimer.Dispose();
+                    hoverCheckTimer = null;
                 }
             }
+            base.Dispose(disposing);
         }
     }
 
     public class MainForm : Form
     {
+        private bool isInitializingConfig = false;
+
         private Panel pnlHeader;
         private Label lblAppTitle;
         private Label lblVersion;
@@ -152,6 +281,8 @@ namespace PasteImageAsFile
 
         // Элементы страницы "Основные"
         private FluentComboBox cmbTheme;
+        private FluentComboBox cmbAccentColor;
+        private Panel pnlAccentPreview;
         private CheckBox chkAutoRun;
         private CheckBox chkContextMenu;
         private CheckBox chkClassicContextMenuWin11;
@@ -169,6 +300,7 @@ namespace PasteImageAsFile
 
         // Элементы страницы "SuperHub"
         private CheckBox chkSuperHubEnabled;
+        private FluentComboBox cmbSuperHubScreens;
         private FluentComboBox cmbSuperHubViewMode;
         private FluentComboBox cmbSuperHubSize;
         private FluentComboBox cmbSuperHubPosition;
@@ -186,9 +318,7 @@ namespace PasteImageAsFile
 
         public MainForm()
         {
-            toolTip = new ToolTip();
-            toolTip.AutoPopDelay = 6000;
-            toolTip.InitialDelay = 300;
+            toolTip = ThemeHelper.CreateFluentToolTip();
 
             InitializeComponent();
             LoadConfigToUi();
@@ -487,6 +617,7 @@ namespace PasteImageAsFile
             cmbTheme = CreateStyledComboBox(220, top, 230);
             cmbTheme.Items.AddRange(new object[] { "Системная (Windows)", "Темная тема", "Светлая тема" });
             cmbTheme.SelectedIndexChanged += (s, e) => {
+                if (isInitializingConfig) return;
                 if (cmbTheme.SelectedIndex == 1) Config.ThemeMode = "Dark";
                 else if (cmbTheme.SelectedIndex == 2) Config.ThemeMode = "Light";
                 else Config.ThemeMode = "System";
@@ -496,10 +627,95 @@ namespace PasteImageAsFile
             pnlPageGeneral.Controls.Add(lblTheme);
             pnlPageGeneral.Controls.Add(cmbTheme);
 
+            top += step + 4;
+
+            // Акцентный цвет
+            Label lblAccent = new Label
+            {
+                Text = "Акцентный цвет:",
+                Font = new Font("Segoe UI Semibold", 9f),
+                Location = new Point(14, top + 4),
+                AutoSize = true
+            };
+            cmbAccentColor = CreateStyledComboBox(220, top, 192);
+            cmbAccentColor.Items.AddRange(new object[] {
+                "Системный (Windows)",
+                "Синий (Windows Blue)",
+                "Бирюзовый (Teal)",
+                "Фиолетовый (Purple)",
+                "Изумрудный (Green)",
+                "Коралловый (Coral)",
+                "Оранжевый (Orange)",
+                "Свой цвет..."
+            });
+
+            pnlAccentPreview = new Panel
+            {
+                Location = new Point(418, top + 1),
+                Size = new Size(32, 24),
+                BackColor = ThemeHelper.Accent,
+                Cursor = Cursors.Hand
+            };
+            pnlAccentPreview.Paint += (s, e) => {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var pen = new Pen(ThemeHelper.CardBorder, 1))
+                using (var path = CreateRoundedPath(new Rectangle(0, 0, pnlAccentPreview.Width - 1, pnlAccentPreview.Height - 1), 4))
+                {
+                    e.Graphics.DrawPath(pen, path);
+                }
+            };
+            toolTip.SetToolTip(pnlAccentPreview, "Кликните, чтобы выбрать произвольный акцентный цвет");
+
+            Action pickCustomColor = () => {
+                using (ColorDialog cd = new ColorDialog())
+                {
+                    cd.Color = ThemeHelper.Accent;
+                    cd.FullOpen = true;
+                    if (cd.ShowDialog() == DialogResult.OK)
+                    {
+                        string hex = string.Format("#{0:X2}{1:X2}{2:X2}", cd.Color.R, cd.Color.G, cd.Color.B);
+                        Config.AccentColor = hex;
+                        pnlAccentPreview.BackColor = cd.Color;
+                        pnlAccentPreview.Invalidate();
+                        ThemeHelper.NotifyThemeChanged();
+                        if (cmbAccentColor != null) cmbAccentColor.SelectedIndex = 7;
+                    }
+                }
+            };
+            pnlAccentPreview.Click += (s, e) => pickCustomColor();
+
+            cmbAccentColor.SelectedIndexChanged += (s, e) => {
+                if (isInitializingConfig) return;
+                string chosenHex = "";
+                switch (cmbAccentColor.SelectedIndex)
+                {
+                    case 0: chosenHex = ""; break;
+                    case 1: chosenHex = "#0078D4"; break;
+                    case 2: chosenHex = "#008272"; break;
+                    case 3: chosenHex = "#8764B8"; break;
+                    case 4: chosenHex = "#107C41"; break;
+                    case 5: chosenHex = "#D13438"; break;
+                    case 6: chosenHex = "#CA5010"; break;
+                    case 7: pickCustomColor(); return;
+                }
+                Config.AccentColor = chosenHex;
+                pnlAccentPreview.BackColor = ThemeHelper.Accent;
+                pnlAccentPreview.Invalidate();
+                ThemeHelper.NotifyThemeChanged();
+            };
+            toolTip.SetToolTip(cmbAccentColor, "Акцентный цвет маркеров SuperHub, кнопок и активных элементов");
+            pnlPageGeneral.Controls.Add(lblAccent);
+            pnlPageGeneral.Controls.Add(cmbAccentColor);
+            pnlPageGeneral.Controls.Add(pnlAccentPreview);
+
             top += step + 8;
 
             chkAutoRun = CreateCheckBox("Автозапуск вместе со стартом Windows", 14, top);
-            chkAutoRun.CheckedChanged += (s, e) => { Config.AutoRun = chkAutoRun.Checked; ShellIntegration.SetAutoRun(chkAutoRun.Checked); };
+            chkAutoRun.CheckedChanged += (s, e) => {
+                if (isInitializingConfig) return;
+                Config.AutoRun = chkAutoRun.Checked;
+                ShellIntegration.SetAutoRun(chkAutoRun.Checked);
+            };
             toolTip.SetToolTip(chkAutoRun, "Автоматически запускать службу при входе в систему");
             pnlPageGeneral.Controls.Add(chkAutoRun);
             top += step;
@@ -564,6 +780,7 @@ namespace PasteImageAsFile
             cmbClipboardClickAction = CreateStyledComboBox(220, top, 230);
             cmbClipboardClickAction.Items.AddRange(new object[] { "Вставить сразу [Ctrl+V]", "Только скопировать в буфер" });
             cmbClipboardClickAction.SelectedIndexChanged += (s, e) => {
+                if (isInitializingConfig) return;
                 Config.ClipboardClickAction = (cmbClipboardClickAction.SelectedIndex == 1) ? "Copy" : "Paste";
             };
             toolTip.SetToolTip(cmbClipboardClickAction, "Что делать при одиночном клике по карточке в журнале буфера обмена");
@@ -574,6 +791,7 @@ namespace PasteImageAsFile
 
             chkTrayClickOpensClipboard = CreateCheckBox("Клик по значку в трее открывает буфер обмена", 14, top);
             chkTrayClickOpensClipboard.CheckedChanged += (s, e) => {
+                if (isInitializingConfig) return;
                 Config.TrayClickOpensClipboard = chkTrayClickOpensClipboard.Checked;
             };
             toolTip.SetToolTip(chkTrayClickOpensClipboard, "При нажатии левой кнопкой на иконку у часов открывать всплывающий буфер вместо окна настроек");
@@ -582,6 +800,7 @@ namespace PasteImageAsFile
 
             chkShowHistoryMenu = CreateCheckBox("Пункт \"Буфер обмена\" в контекстном меню", 14, top);
             chkShowHistoryMenu.CheckedChanged += (s, e) => {
+                if (isInitializingConfig) return;
                 Config.ShowHistoryMenu = chkShowHistoryMenu.Checked;
                 ShellIntegration.SetHistoryMenuItem(chkShowHistoryMenu.Checked);
             };
@@ -590,13 +809,19 @@ namespace PasteImageAsFile
             top += step;
 
             chkHistoryRememberText = CreateCheckBox("Запоминать скопированный текст", 14, top);
-            chkHistoryRememberText.CheckedChanged += (s, e) => { Config.HistoryRememberText = chkHistoryRememberText.Checked; };
+            chkHistoryRememberText.CheckedChanged += (s, e) => {
+                if (isInitializingConfig) return;
+                Config.HistoryRememberText = chkHistoryRememberText.Checked;
+            };
             toolTip.SetToolTip(chkHistoryRememberText, "Вести историю скопированных фрагментов текста с возможностью быстрого поиска");
             pnlPageClipboard.Controls.Add(chkHistoryRememberText);
             top += step;
 
             chkHistoryRememberFiles = CreateCheckBox("Запоминать скопированные файлы и папки", 14, top);
-            chkHistoryRememberFiles.CheckedChanged += (s, e) => { Config.HistoryRememberFiles = chkHistoryRememberFiles.Checked; };
+            chkHistoryRememberFiles.CheckedChanged += (s, e) => {
+                if (isInitializingConfig) return;
+                Config.HistoryRememberFiles = chkHistoryRememberFiles.Checked;
+            };
             toolTip.SetToolTip(chkHistoryRememberFiles, "Вести историю скопированных путей к файлам с отображением системных иконок");
             pnlPageClipboard.Controls.Add(chkHistoryRememberFiles);
             top += step + 12;
@@ -637,15 +862,56 @@ namespace PasteImageAsFile
         private void BuildSuperHubPage()
         {
             int top = 10;
-            int step = 28;
+            int step = 34;
 
             chkSuperHubEnabled = CreateCheckBox("Включить плавающую полку SuperHub у края экрана", 14, top);
             chkSuperHubEnabled.CheckedChanged += (s, e) => {
+                if (isInitializingConfig) return;
                 Config.SuperHubEnabled = chkSuperHubEnabled.Checked;
-                SuperHubDockForm.Instance.PositionCollapsed();
+                SuperHubDockForm.SyncAllDocks();
             };
             toolTip.SetToolTip(chkSuperHubEnabled, "Выдвижная полка для временного накопления и переноса файлов между программами");
             pnlPageSuperHub.Controls.Add(chkSuperHubEnabled);
+            top += 28;
+
+            // 0. Экраны
+            Label lblScreens = new Label
+            {
+                Text = "Отображать полку на экранах:",
+                Font = new Font("Segoe UI Semibold", 9f),
+                Location = new Point(14, top + 4),
+                AutoSize = true
+            };
+            cmbSuperHubScreens = CreateStyledComboBox(220, top, 230);
+            cmbSuperHubScreens.SelectedIndexChanged += (s, e) => {
+                if (isInitializingConfig) return;
+                int idx = cmbSuperHubScreens.SelectedIndex;
+                if (idx == 0)
+                {
+                    Config.SuperHubScreenMode = "All";
+                    Config.SuperHubTargetScreen = "";
+                }
+                else if (idx == 1)
+                {
+                    Config.SuperHubScreenMode = "Primary";
+                    Config.SuperHubTargetScreen = Screen.PrimaryScreen.DeviceName;
+                }
+                else
+                {
+                    Screen[] scrs = Screen.AllScreens;
+                    int scrIdx = idx - 2;
+                    if (scrIdx >= 0 && scrIdx < scrs.Length)
+                    {
+                        Config.SuperHubScreenMode = "Specific";
+                        Config.SuperHubTargetScreen = scrs[scrIdx].DeviceName;
+                    }
+                }
+                SuperHubDockForm.SyncAllDocks();
+                UpdatePositionComboForCurrentScreen();
+            };
+            toolTip.SetToolTip(cmbSuperHubScreens, "Выбор мониторов, на которых будет активна выдвижная полка SuperHub");
+            pnlPageSuperHub.Controls.Add(lblScreens);
+            pnlPageSuperHub.Controls.Add(cmbSuperHubScreens);
             top += step;
 
             // 1. Режим полки (Все табы vs Только SuperHub)
@@ -653,7 +919,7 @@ namespace PasteImageAsFile
             {
                 Text = "Режим выдвижной полки:",
                 Font = new Font("Segoe UI Semibold", 9f),
-                Location = new Point(14, top + 3),
+                Location = new Point(14, top + 4),
                 AutoSize = true
             };
             cmbSuperHubViewMode = CreateStyledComboBox(220, top, 230);
@@ -662,8 +928,9 @@ namespace PasteImageAsFile
                 "Только полка SuperHub (минималистичный)"
             });
             cmbSuperHubViewMode.SelectedIndexChanged += (s, e) => {
+                if (isInitializingConfig) return;
                 Config.SuperHubViewMode = (cmbSuperHubViewMode.SelectedIndex == 1) ? "OnlyHub" : "Tabs";
-                SuperHubDockForm.Instance.RefreshItems();
+                SuperHubDockForm.RefreshAllDocks();
             };
             toolTip.SetToolTip(cmbSuperHubViewMode, "Выбор режима: отображать вкладки всех категорий буфера обмена или только файлы полки SuperHub");
             pnlPageSuperHub.Controls.Add(lblMode);
@@ -675,7 +942,7 @@ namespace PasteImageAsFile
             {
                 Text = "Размер выдвижной полки:",
                 Font = new Font("Segoe UI Semibold", 9f),
-                Location = new Point(14, top + 3),
+                Location = new Point(14, top + 4),
                 AutoSize = true
             };
             cmbSuperHubSize = CreateStyledComboBox(220, top, 230);
@@ -686,26 +953,31 @@ namespace PasteImageAsFile
                 "Широкий (500 × 700)"
             });
             cmbSuperHubSize.SelectedIndexChanged += (s, e) => {
+                if (isInitializingConfig) return;
                 switch (cmbSuperHubSize.SelectedIndex)
                 {
                     case 0:
                         Config.SuperHubWidthVertical = 280; Config.SuperHubHeightVertical = 420;
                         Config.SuperHubWidthHorizontal = 520; Config.SuperHubHeightHorizontal = 190;
+                        Config.ClipboardFlyoutWidth = 280; Config.ClipboardFlyoutHeight = 420;
                         break;
                     case 1:
                         Config.SuperHubWidthVertical = 340; Config.SuperHubHeightVertical = 500;
                         Config.SuperHubWidthHorizontal = 620; Config.SuperHubHeightHorizontal = 220;
+                        Config.ClipboardFlyoutWidth = 340; Config.ClipboardFlyoutHeight = 500;
                         break;
                     case 2:
                         Config.SuperHubWidthVertical = 420; Config.SuperHubHeightVertical = 620;
                         Config.SuperHubWidthHorizontal = 750; Config.SuperHubHeightHorizontal = 260;
+                        Config.ClipboardFlyoutWidth = 420; Config.ClipboardFlyoutHeight = 620;
                         break;
                     case 3:
                         Config.SuperHubWidthVertical = 500; Config.SuperHubHeightVertical = 700;
                         Config.SuperHubWidthHorizontal = 900; Config.SuperHubHeightHorizontal = 300;
+                        Config.ClipboardFlyoutWidth = 500; Config.ClipboardFlyoutHeight = 700;
                         break;
                 }
-                SuperHubDockForm.Instance.PositionCollapsed();
+                SuperHubDockForm.RepositionAllDocks();
             };
             toolTip.SetToolTip(cmbSuperHubSize, "Базовый размер полки. Вы также можете свободно изменять размер перетаскиванием краев окна мышью.");
             pnlPageSuperHub.Controls.Add(lblSize);
@@ -717,7 +989,7 @@ namespace PasteImageAsFile
             {
                 Text = "Расположение на экране:",
                 Font = new Font("Segoe UI Semibold", 9f),
-                Location = new Point(14, top + 3),
+                Location = new Point(14, top + 4),
                 AutoSize = true
             };
             cmbSuperHubPosition = CreateStyledComboBox(220, top, 230);
@@ -729,21 +1001,44 @@ namespace PasteImageAsFile
                 "Слева вверху",
                 "Слева внизу",
                 "Сверху по центру",
-                "Снизу по центру"
+                "Снизу по центру",
+                "В правом нижнем углу (полукруг)",
+                "В левом нижнем углу (полукруг)",
+                "В правом верхнем углу (полукруг)",
+                "В левом верхнем углу (полукруг)"
             });
             cmbSuperHubPosition.SelectedIndexChanged += (s, e) => {
+                if (isInitializingConfig) return;
+                string newPos = "RightCenter";
                 switch (cmbSuperHubPosition.SelectedIndex)
                 {
-                    case 0: Config.SuperHubPosition = "RightCenter"; break;
-                    case 1: Config.SuperHubPosition = "RightTop"; break;
-                    case 2: Config.SuperHubPosition = "RightBottom"; break;
-                    case 3: Config.SuperHubPosition = "LeftCenter"; break;
-                    case 4: Config.SuperHubPosition = "LeftTop"; break;
-                    case 5: Config.SuperHubPosition = "LeftBottom"; break;
-                    case 6: Config.SuperHubPosition = "TopCenter"; break;
-                    case 7: Config.SuperHubPosition = "BottomCenter"; break;
+                    case 0: newPos = "RightCenter"; break;
+                    case 1: newPos = "RightTop"; break;
+                    case 2: newPos = "RightBottom"; break;
+                    case 3: newPos = "LeftCenter"; break;
+                    case 4: newPos = "LeftTop"; break;
+                    case 5: newPos = "LeftBottom"; break;
+                    case 6: newPos = "TopCenter"; break;
+                    case 7: newPos = "BottomCenter"; break;
+                    case 8: newPos = "CornerBottomRight"; break;
+                    case 9: newPos = "CornerBottomLeft"; break;
+                    case 10: newPos = "CornerTopRight"; break;
+                    case 11: newPos = "CornerTopLeft"; break;
                 }
-                SuperHubDockForm.Instance.PositionCollapsed();
+                string dev = GetSelectedScreenDevice();
+                if (!string.IsNullOrEmpty(dev))
+                {
+                    Config.SetScreenPosition(dev, newPos);
+                }
+                else
+                {
+                    foreach (var scr in Screen.AllScreens)
+                    {
+                        Config.SetScreenPosition(scr.DeviceName, newPos);
+                    }
+                }
+                Config.SuperHubPosition = newPos;
+                SuperHubDockForm.RepositionAllDocks();
             };
             toolTip.SetToolTip(cmbSuperHubPosition, "К какому краю или углу монитора прикреплять выдвижную полку SuperHub");
             pnlPageSuperHub.Controls.Add(lblPos);
@@ -755,7 +1050,7 @@ namespace PasteImageAsFile
             {
                 Text = "Перетаскивание файлов наружу:",
                 Font = new Font("Segoe UI Semibold", 9f),
-                Location = new Point(14, top + 3),
+                Location = new Point(14, top + 4),
                 AutoSize = true
             };
             cmbSuperHubDragMode = CreateStyledComboBox(220, top, 230);
@@ -765,7 +1060,7 @@ namespace PasteImageAsFile
             });
             cmbSuperHubDragMode.SelectedIndexChanged += (s, e) => {
                 Config.SuperHubDragMode = (cmbSuperHubDragMode.SelectedIndex == 1) ? "Move" : "Copy";
-                SuperHubDockForm.Instance.RefreshItems();
+                SuperHubDockForm.RefreshAllDocks();
             };
             toolTip.SetToolTip(cmbSuperHubDragMode, "В режиме Копирования файлы всегда остаются на своих местах. В режиме Перемещения они вырезаются.");
             pnlPageSuperHub.Controls.Add(lblDrag);
@@ -777,7 +1072,7 @@ namespace PasteImageAsFile
             {
                 Text = "Чувствительность у края:",
                 Font = new Font("Segoe UI Semibold", 9f),
-                Location = new Point(14, top + 3),
+                Location = new Point(14, top + 4),
                 AutoSize = true
             };
             cmbSuperHubSens = CreateStyledComboBox(220, top, 230);
@@ -800,11 +1095,12 @@ namespace PasteImageAsFile
             toolTip.SetToolTip(cmbSuperHubSens, "Ширина зоны приближения курсора к краю экрана для автоматического выдвижения полки");
             pnlPageSuperHub.Controls.Add(lblSens);
             pnlPageSuperHub.Controls.Add(cmbSuperHubSens);
-            top += step + 4;
+            top += step + 6;
 
             btnTestSuperHub = CreateButton("Раскрыть полку SuperHub сейчас", 14, top, 240, 28);
             btnTestSuperHub.Click += (s, e) => {
-                SuperHubDockForm.Instance.ExpandShelf();
+                SuperHubDockForm dock = SuperHubDockForm.Instance;
+                if (dock != null) dock.ExpandShelf();
             };
             toolTip.SetToolTip(btnTestSuperHub, "Немедленно показать полку SuperHub для проверки");
             pnlPageSuperHub.Controls.Add(btnTestSuperHub);
@@ -841,6 +1137,59 @@ namespace PasteImageAsFile
             };
             pnlSuperHelp.Controls.Add(lblSuperHint);
             pnlPageSuperHub.Controls.Add(pnlSuperHelp);
+        }
+
+        private string GetSelectedScreenDevice()
+        {
+            if (cmbSuperHubScreens == null || cmbSuperHubScreens.SelectedIndex < 0) return null;
+            int idx = cmbSuperHubScreens.SelectedIndex;
+            if (idx == 0)
+            {
+                return null;
+            }
+            if (idx == 1)
+            {
+                return Screen.PrimaryScreen.DeviceName;
+            }
+            Screen[] scrs = Screen.AllScreens;
+            int scrIdx = idx - 2;
+            if (scrIdx >= 0 && scrIdx < scrs.Length)
+            {
+                return scrs[scrIdx].DeviceName;
+            }
+            return null;
+        }
+
+        private void UpdatePositionComboForCurrentScreen()
+        {
+            string dev = GetSelectedScreenDevice();
+            string pos;
+            if (string.IsNullOrEmpty(dev))
+            {
+                pos = Config.SuperHubPosition;
+            }
+            else
+            {
+                pos = Config.GetScreenPosition(dev, Config.SuperHubPosition);
+            }
+            SelectPositionInCombo(pos);
+        }
+
+        private void SelectPositionInCombo(string pos)
+        {
+            if (cmbSuperHubPosition == null) return;
+            if (string.Equals(pos, "RightTop", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 1;
+            else if (string.Equals(pos, "RightBottom", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 2;
+            else if (string.Equals(pos, "LeftCenter", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 3;
+            else if (string.Equals(pos, "LeftTop", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 4;
+            else if (string.Equals(pos, "LeftBottom", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 5;
+            else if (string.Equals(pos, "TopCenter", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 6;
+            else if (string.Equals(pos, "BottomCenter", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 7;
+            else if (string.Equals(pos, "CornerBottomRight", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 8;
+            else if (string.Equals(pos, "CornerBottomLeft", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 9;
+            else if (string.Equals(pos, "CornerTopRight", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 10;
+            else if (string.Equals(pos, "CornerTopLeft", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 11;
+            else cmbSuperHubPosition.SelectedIndex = 0;
         }
 
         private FluentComboBox CreateStyledComboBox(int x, int y, int w)
@@ -906,6 +1255,16 @@ namespace PasteImageAsFile
                 cmbTheme.BackColor = inputBg;
                 cmbTheme.ForeColor = text;
             }
+            if (cmbAccentColor != null)
+            {
+                cmbAccentColor.BackColor = inputBg;
+                cmbAccentColor.ForeColor = text;
+            }
+            if (pnlAccentPreview != null)
+            {
+                pnlAccentPreview.BackColor = ThemeHelper.Accent;
+                pnlAccentPreview.Invalidate();
+            }
             if (cmbClipboardClickAction != null)
             {
                 cmbClipboardClickAction.BackColor = inputBg;
@@ -940,6 +1299,11 @@ namespace PasteImageAsFile
             {
                 cmbSuperHubSize.BackColor = inputBg;
                 cmbSuperHubSize.ForeColor = text;
+            }
+            if (cmbSuperHubScreens != null)
+            {
+                cmbSuperHubScreens.BackColor = inputBg;
+                cmbSuperHubScreens.ForeColor = text;
             }
 
             // Чекбоксы
@@ -1047,62 +1411,125 @@ namespace PasteImageAsFile
 
         private void LoadConfigToUi()
         {
-            // Theme
-            string th = Config.ThemeMode;
-            if (string.Equals(th, "Dark", StringComparison.OrdinalIgnoreCase)) cmbTheme.SelectedIndex = 1;
-            else if (string.Equals(th, "Light", StringComparison.OrdinalIgnoreCase)) cmbTheme.SelectedIndex = 2;
-            else cmbTheme.SelectedIndex = 0;
-
-            chkAutoRun.Checked = Config.AutoRun;
-            chkContextMenu.Checked = Config.ContextMenu;
-            chkShowHistoryMenu.Checked = Config.ShowHistoryMenu;
-            chkShowHistoryMenu.Enabled = Config.ContextMenu;
-            chkTrayClickOpensClipboard.Checked = Config.TrayClickOpensClipboard;
-            chkClassicContextMenuWin11.Checked = Config.ClassicContextMenuWin11 || ShellIntegration.IsClassicContextMenuWin11Enabled();
-            chkPlaceUnderCursor.Checked = Config.PlaceUnderCursor;
-            chkExtractOriginalName.Checked = Config.ExtractOriginalName;
-            chkHistoryRememberText.Checked = Config.HistoryRememberText;
-            chkHistoryRememberFiles.Checked = Config.HistoryRememberFiles;
-            txtPrefix.Text = Config.DefaultPrefix;
-
-            // Clipboard Action
-            bool isPaste = string.Equals(Config.ClipboardClickAction, "Paste", StringComparison.OrdinalIgnoreCase);
-            cmbClipboardClickAction.SelectedIndex = isPaste ? 0 : 1;
-
-            // SuperHub
-            chkSuperHubEnabled.Checked = Config.SuperHubEnabled;
-            string pos = Config.SuperHubPosition;
-            if (string.Equals(pos, "RightTop", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 1;
-            else if (string.Equals(pos, "RightBottom", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 2;
-            else if (string.Equals(pos, "LeftCenter", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 3;
-            else if (string.Equals(pos, "LeftTop", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 4;
-            else if (string.Equals(pos, "LeftBottom", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 5;
-            else if (string.Equals(pos, "TopCenter", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 6;
-            else if (string.Equals(pos, "BottomCenter", StringComparison.OrdinalIgnoreCase)) cmbSuperHubPosition.SelectedIndex = 7;
-            else cmbSuperHubPosition.SelectedIndex = 0;
-
-            bool isMove = string.Equals(Config.SuperHubDragMode, "Move", StringComparison.OrdinalIgnoreCase);
-            cmbSuperHubDragMode.SelectedIndex = isMove ? 1 : 0;
-
-            // SuperHub ViewMode
-            bool isOnlyHub = string.Equals(Config.SuperHubViewMode, "OnlyHub", StringComparison.OrdinalIgnoreCase);
-            if (cmbSuperHubViewMode != null) cmbSuperHubViewMode.SelectedIndex = isOnlyHub ? 1 : 0;
-
-            // SuperHub Size Preset
-            int wV = Config.SuperHubWidthVertical;
-            if (cmbSuperHubSize != null)
+            isInitializingConfig = true;
+            try
             {
-                if (wV <= 300) cmbSuperHubSize.SelectedIndex = 0;
-                else if (wV <= 380) cmbSuperHubSize.SelectedIndex = 1;
-                else if (wV <= 460) cmbSuperHubSize.SelectedIndex = 2;
-                else cmbSuperHubSize.SelectedIndex = 3;
-            }
+                // Theme
+                string th = Config.ThemeMode;
+                if (string.Equals(th, "Dark", StringComparison.OrdinalIgnoreCase)) cmbTheme.SelectedIndex = 1;
+                else if (string.Equals(th, "Light", StringComparison.OrdinalIgnoreCase)) cmbTheme.SelectedIndex = 2;
+                else cmbTheme.SelectedIndex = 0;
 
-            int sens = Config.SuperHubSensitivity;
-            if (sens <= 40) cmbSuperHubSens.SelectedIndex = 0;
-            else if (sens <= 75) cmbSuperHubSens.SelectedIndex = 1;
-            else if (sens <= 105) cmbSuperHubSens.SelectedIndex = 2;
-            else cmbSuperHubSens.SelectedIndex = 3;
+                // Accent Color
+                if (cmbAccentColor != null)
+                {
+                    string acc = Config.AccentColor;
+                    if (string.IsNullOrEmpty(acc)) cmbAccentColor.SelectedIndex = 0;
+                    else if (string.Equals(acc, "#0078D4", StringComparison.OrdinalIgnoreCase)) cmbAccentColor.SelectedIndex = 1;
+                    else if (string.Equals(acc, "#008272", StringComparison.OrdinalIgnoreCase)) cmbAccentColor.SelectedIndex = 2;
+                    else if (string.Equals(acc, "#8764B8", StringComparison.OrdinalIgnoreCase)) cmbAccentColor.SelectedIndex = 3;
+                    else if (string.Equals(acc, "#107C41", StringComparison.OrdinalIgnoreCase)) cmbAccentColor.SelectedIndex = 4;
+                    else if (string.Equals(acc, "#D13438", StringComparison.OrdinalIgnoreCase)) cmbAccentColor.SelectedIndex = 5;
+                    else if (string.Equals(acc, "#CA5010", StringComparison.OrdinalIgnoreCase)) cmbAccentColor.SelectedIndex = 6;
+                    else cmbAccentColor.SelectedIndex = 7;
+                }
+                if (pnlAccentPreview != null)
+                {
+                    pnlAccentPreview.BackColor = ThemeHelper.Accent;
+                    pnlAccentPreview.Invalidate();
+                }
+
+                chkAutoRun.Checked = Config.AutoRun;
+                chkContextMenu.Checked = Config.ContextMenu;
+                chkShowHistoryMenu.Checked = Config.ShowHistoryMenu;
+                chkShowHistoryMenu.Enabled = Config.ContextMenu;
+                chkTrayClickOpensClipboard.Checked = Config.TrayClickOpensClipboard;
+                chkClassicContextMenuWin11.Checked = Config.ClassicContextMenuWin11 || ShellIntegration.IsClassicContextMenuWin11Enabled();
+                chkPlaceUnderCursor.Checked = Config.PlaceUnderCursor;
+                chkExtractOriginalName.Checked = Config.ExtractOriginalName;
+                chkHistoryRememberText.Checked = Config.HistoryRememberText;
+                chkHistoryRememberFiles.Checked = Config.HistoryRememberFiles;
+                txtPrefix.Text = Config.DefaultPrefix;
+
+                // Clipboard Action
+                bool isPaste = string.Equals(Config.ClipboardClickAction, "Paste", StringComparison.OrdinalIgnoreCase);
+                cmbClipboardClickAction.SelectedIndex = isPaste ? 0 : 1;
+
+                // SuperHub
+                chkSuperHubEnabled.Checked = Config.SuperHubEnabled;
+
+                if (cmbSuperHubScreens != null)
+                {
+                    cmbSuperHubScreens.Items.Clear();
+                    cmbSuperHubScreens.Items.Add("На всех мониторах (Все экраны)");
+                    cmbSuperHubScreens.Items.Add("Только основной экран");
+
+                    Screen[] allScreens = Screen.AllScreens;
+                    for (int i = 0; i < allScreens.Length; i++)
+                    {
+                        Screen scr = allScreens[i];
+                        string title = string.Format("Экран {0} ({1}x{2}{3})", 
+                            i + 1, 
+                            scr.Bounds.Width, 
+                            scr.Bounds.Height, 
+                            scr.Primary ? ", Основной" : "");
+                        cmbSuperHubScreens.Items.Add(title);
+                    }
+
+                    string mode = Config.SuperHubScreenMode;
+                    if (string.Equals(mode, "Primary", StringComparison.OrdinalIgnoreCase))
+                    {
+                        cmbSuperHubScreens.SelectedIndex = 1;
+                    }
+                    else if (string.Equals(mode, "Specific", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string targetDev = Config.SuperHubTargetScreen;
+                        int targetIdx = -1;
+                        for (int i = 0; i < allScreens.Length; i++)
+                        {
+                            if (string.Equals(allScreens[i].DeviceName, targetDev, StringComparison.OrdinalIgnoreCase))
+                            {
+                                targetIdx = i + 2;
+                                break;
+                            }
+                        }
+                        cmbSuperHubScreens.SelectedIndex = (targetIdx >= 0 && targetIdx < cmbSuperHubScreens.Items.Count) ? targetIdx : 0;
+                    }
+                    else
+                    {
+                        cmbSuperHubScreens.SelectedIndex = 0;
+                    }
+                }
+
+                UpdatePositionComboForCurrentScreen();
+
+                bool isMove = string.Equals(Config.SuperHubDragMode, "Move", StringComparison.OrdinalIgnoreCase);
+                cmbSuperHubDragMode.SelectedIndex = isMove ? 1 : 0;
+
+                // SuperHub ViewMode
+                bool isOnlyHub = string.Equals(Config.SuperHubViewMode, "OnlyHub", StringComparison.OrdinalIgnoreCase);
+                if (cmbSuperHubViewMode != null) cmbSuperHubViewMode.SelectedIndex = isOnlyHub ? 1 : 0;
+
+                // SuperHub Size Preset (синхронизируем с текущей фактической шириной flyout)
+                int flyoutW = Config.ClipboardFlyoutWidth;
+                if (cmbSuperHubSize != null)
+                {
+                    if (flyoutW <= 300) cmbSuperHubSize.SelectedIndex = 0;
+                    else if (flyoutW <= 380) cmbSuperHubSize.SelectedIndex = 1;
+                    else if (flyoutW <= 460) cmbSuperHubSize.SelectedIndex = 2;
+                    else cmbSuperHubSize.SelectedIndex = 3;
+                }
+
+                int sens = Config.SuperHubSensitivity;
+                if (sens <= 40) cmbSuperHubSens.SelectedIndex = 0;
+                else if (sens <= 75) cmbSuperHubSens.SelectedIndex = 1;
+                else if (sens <= 105) cmbSuperHubSens.SelectedIndex = 2;
+                else cmbSuperHubSens.SelectedIndex = 3;
+            }
+            finally
+            {
+                isInitializingConfig = false;
+            }
         }
 
         public void UpdateStatus()

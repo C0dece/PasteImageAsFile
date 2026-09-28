@@ -45,6 +45,7 @@ namespace PasteImageAsFile
 
         private const int WM_NCHITTEST = 0x0084;
         private const int WM_GETMINMAXINFO = 0x0024;
+        private const int WM_SIZING = 0x0214;
         private const int HTCLIENT = 1;
         private const int HTLEFT = 10;
         private const int HTRIGHT = 11;
@@ -54,6 +55,15 @@ namespace PasteImageAsFile
         private const int HTBOTTOM = 15;
         private const int HTBOTTOMLEFT = 16;
         private const int HTBOTTOMRIGHT = 17;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MINMAXINFO
@@ -127,6 +137,7 @@ namespace PasteImageAsFile
         }
 
         private static ClipboardFlyoutForm currentInstance;
+        public static ClipboardFlyoutForm CurrentInstance { get { return currentInstance; } }
         private static readonly object instanceLock = new object();
 
         protected override CreateParams CreateParams
@@ -135,6 +146,7 @@ namespace PasteImageAsFile
             {
                 CreateParams cp = base.CreateParams;
                 cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW
+                cp.ExStyle |= 0x02000000;    // WS_EX_COMPOSITED (Композитный DWM буфер - устраняет мерцание всех дочерних окон)
                 return cp;
             }
         }
@@ -161,12 +173,29 @@ namespace PasteImageAsFile
         private TextBox txtSearch;
         private FlyoutViewportPanel pnlViewport;
         private Panel cardsContainer;
+        private Panel cardsContainerClipboard;
+        private Panel cardsContainerSuperHub;
         private Button btnPinWindow;
         private Button btnClose;
         private Button btnClearAll;
         private Button btnDragMode;
+        private Button btnAddNote;
         private ToolTip toolTip;
         private bool isWindowPinned = false;
+        private bool isShowingModalDialog = false;
+        private bool isConfirmingClear = false;
+        private System.Windows.Forms.Timer clearConfirmTimer;
+        private int lastLayoutCardWidth = -1;
+
+        // Позиционирование и ресайз относительно маркера
+        private bool isDockFlyout = false;
+        private string dockPositionMode = "";
+        private int anchorMarkerCenterY = 0;
+        private Screen currentDockScreen = null;
+
+        // Таймер автоскрытия при уходе мыши
+        private System.Windows.Forms.Timer mouseLeaveTimer;
+        private int mouseAwayCounter = 0;
 
         // Кастомный Fluent скроллбар
         private int scrollY = 0;
@@ -179,27 +208,25 @@ namespace PasteImageAsFile
         // Анимация плавного появления окна (Fade-in + Slide)
         private System.Windows.Forms.Timer openAnimTimer;
         private int openAnimStep = 0;
-        private const int OpenAnimTotalSteps = 8;
+        private const int OpenAnimTotalSteps = 6;
         private Point openTargetLocation;
-        private int openStartY;
+        private Point openStartPoint;
 
         public ClipboardFlyoutForm(IntPtr prevFg)
         {
+            Logger.Log("ClipboardFlyoutForm constructor start");
             this.previousForegroundWindow = prevFg;
             this.FormBorderStyle = FormBorderStyle.None;
             this.ShowInTaskbar = false;
             this.StartPosition = FormStartPosition.Manual;
             this.Size = new Size(Config.ClipboardFlyoutWidth, Config.ClipboardFlyoutHeight);
-            this.MinimumSize = new Size(360, 380);
+            this.MinimumSize = new Size(260, 240);
             this.DoubleBuffered = true;
             this.TopMost = true;
             this.KeyPreview = true;
             this.AllowDrop = true;
 
-            toolTip = new ToolTip();
-            toolTip.AutoPopDelay = 6000;
-            toolTip.InitialDelay = 200;
-            toolTip.ReshowDelay = 100;
+            toolTip = ThemeHelper.CreateFluentToolTip();
             toolTip.ShowAlways = true;
 
             this.Shown += (s, e) => {
@@ -227,18 +254,56 @@ namespace PasteImageAsFile
             ApplyTheme();
 
             this.Deactivate += (s, e) => {
-                if (!isWindowPinned) CloseFlyout();
+                if (!isWindowPinned && !isShowingModalDialog) CloseFlyout();
             };
 
             this.KeyDown += (s, e) => {
-                if (e.KeyCode == Keys.Escape) CloseFlyout();
+                if (e.KeyCode == Keys.Escape)
+                {
+                    CloseFlyout();
+                }
+                else if (e.Control && e.KeyCode == Keys.N && currentMainTab == 1)
+                {
+                    OpenNewNoteDialog();
+                    e.SuppressKeyPress = true;
+                }
             };
 
-            // Drag and drop для всего окна
-            this.DragEnter += OnFormDragEnter;
-            this.DragDrop += OnFormDragDrop;
+            // Сквозной Drag and drop для всего окна
+            RegisterSuperHubDropTarget(this);
+
+            // Таймер мягкого автоскрытия при уходе курсора за пределы окна
+            mouseLeaveTimer = new System.Windows.Forms.Timer();
+            mouseLeaveTimer.Interval = 100;
+            mouseLeaveTimer.Tick += OnMouseLeaveCheckTick;
+            mouseLeaveTimer.Start();
 
             RefreshItems();
+            Logger.Log("ClipboardFlyoutForm constructor end");
+        }
+
+        private void OnMouseLeaveCheckTick(object sender, EventArgs e)
+        {
+            if (isWindowPinned || isShowingModalDialog || this.IsDisposed || !this.Visible) return;
+            if (isDraggingScroll) return;
+
+            Rectangle bounds = this.Bounds;
+            bounds.Inflate(28, 28);
+
+            Point cur = Cursor.Position;
+            if (!bounds.Contains(cur))
+            {
+                mouseAwayCounter++;
+                if (mouseAwayCounter >= 4) // ~400 мс курсор мыши находится вне окна
+                {
+                    mouseAwayCounter = 0;
+                    CloseFlyout();
+                }
+            }
+            else
+            {
+                mouseAwayCounter = 0;
+            }
         }
 
         private void ApplyWindowStyles()
@@ -298,6 +363,21 @@ namespace PasteImageAsFile
                     openAnimTimer.Dispose();
                     openAnimTimer = null;
                 }
+                if (mouseLeaveTimer != null)
+                {
+                    mouseLeaveTimer.Stop();
+                    mouseLeaveTimer.Dispose();
+                    mouseLeaveTimer = null;
+                }
+                try
+                {
+                    if (this.WindowState == FormWindowState.Normal && this.Width >= 260 && this.Height >= 240)
+                    {
+                        Config.ClipboardFlyoutWidth = this.Width;
+                        Config.ClipboardFlyoutHeight = this.Height;
+                    }
+                }
+                catch {}
                 this.Close();
                 this.Dispose();
             }
@@ -311,14 +391,13 @@ namespace PasteImageAsFile
             }
         }
 
-        public void AnimateIn(Point targetPoint, bool isFromBottom)
+        public void AnimateIn(Point targetPoint, Point startPoint)
         {
             openTargetLocation = targetPoint;
-            int offset = isFromBottom ? 12 : -12;
-            openStartY = targetPoint.Y + offset;
+            openStartPoint = startPoint;
 
-            this.Opacity = 0.05;
-            this.Location = new Point(targetPoint.X, openStartY);
+            this.Opacity = 1.0;
+            this.Location = startPoint;
             this.Show();
             this.BringToFront();
             SetForegroundWindow(this.Handle);
@@ -332,7 +411,7 @@ namespace PasteImageAsFile
 
             openAnimStep = 0;
             openAnimTimer = new System.Windows.Forms.Timer();
-            openAnimTimer.Interval = 12;
+            openAnimTimer.Interval = 10;
             openAnimTimer.Tick += (s, e) => {
                 if (this.IsDisposed || !this.IsHandleCreated)
                 {
@@ -350,9 +429,9 @@ namespace PasteImageAsFile
                 if (t > 1.0f) t = 1.0f;
                 float ease = (float)(1.0 - Math.Pow(1.0 - t, 3));
 
-                int curY = (int)(openStartY + (openTargetLocation.Y - openStartY) * ease);
-                this.Location = new Point(openTargetLocation.X, curY);
-                this.Opacity = Math.Min(1.0, 0.15 + 0.85 * ease);
+                int curX = (int)(openStartPoint.X + (openTargetLocation.X - openStartPoint.X) * ease);
+                int curY = (int)(openStartPoint.Y + (openTargetLocation.Y - openStartPoint.Y) * ease);
+                this.Location = new Point(curX, curY);
 
                 if (openAnimStep >= OpenAnimTotalSteps)
                 {
@@ -360,10 +439,15 @@ namespace PasteImageAsFile
                     openAnimTimer.Dispose();
                     openAnimTimer = null;
                     this.Location = openTargetLocation;
-                    this.Opacity = 1.0;
                 }
             };
             openAnimTimer.Start();
+        }
+
+        public void AnimateIn(Point targetPoint, bool isFromBottom)
+        {
+            int offset = isFromBottom ? 14 : -14;
+            AnimateIn(targetPoint, new Point(targetPoint.X, targetPoint.Y + offset));
         }
 
         protected override void WndProc(ref Message m)
@@ -390,11 +474,69 @@ namespace PasteImageAsFile
                 if (onBottom) { m.Result = (IntPtr)HTBOTTOM; return; }
                 return;
             }
+            const int WM_EXITSIZEMOVE = 0x0232;
+            if (m.Msg == WM_EXITSIZEMOVE)
+            {
+                if (this.WindowState == FormWindowState.Normal && this.Width >= 260 && this.Height >= 240)
+                {
+                    Config.ClipboardFlyoutWidth = this.Width;
+                    Config.ClipboardFlyoutHeight = this.Height;
+                }
+            }
+            if (m.Msg == WM_SIZING && isDockFlyout)
+            {
+                int edge = m.WParam.ToInt32();
+                // 3 = WMSZ_TOP, 6 = WMSZ_BOTTOM, 4 = WMSZ_TOPLEFT, 5 = WMSZ_TOPRIGHT, 7 = WMSZ_BOTTOMLEFT, 8 = WMSZ_BOTTOMRIGHT
+                if (edge == 3 || edge == 6 || edge == 4 || edge == 5 || edge == 7 || edge == 8)
+                {
+                    RECT r = (RECT)Marshal.PtrToStructure(m.LParam, typeof(RECT));
+                    int newH = r.Bottom - r.Top;
+                    if (newH < 240) newH = 240;
+                    if (newH > 1400) newH = 1400;
+
+                    Screen s = currentDockScreen ?? Screen.FromPoint(new Point(r.Left, anchorMarkerCenterY > 0 ? anchorMarkerCenterY : r.Top));
+                    Rectangle wk = s.WorkingArea;
+
+                    if (dockPositionMode.IndexOf("CornerBottom", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        r.Bottom = wk.Bottom - 4;
+                        r.Top = r.Bottom - newH;
+                    }
+                    else if (dockPositionMode.IndexOf("CornerTop", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        r.Top = wk.Top + 4;
+                        r.Bottom = r.Top + newH;
+                    }
+                    else if (anchorMarkerCenterY > 0)
+                    {
+                        int half = newH / 2;
+                        r.Top = anchorMarkerCenterY - half;
+                        r.Bottom = r.Top + newH;
+
+                        if (r.Top < wk.Top + 4)
+                        {
+                            int d = (wk.Top + 4) - r.Top;
+                            r.Top += d;
+                            r.Bottom += d;
+                        }
+                        if (r.Bottom > wk.Bottom - 4)
+                        {
+                            int d = r.Bottom - (wk.Bottom - 4);
+                            r.Top -= d;
+                            r.Bottom -= d;
+                        }
+                    }
+
+                    Marshal.StructureToPtr(r, m.LParam, true);
+                    m.Result = (IntPtr)1;
+                    return;
+                }
+            }
             if (m.Msg == WM_GETMINMAXINFO)
             {
                 MINMAXINFO mmi = (MINMAXINFO)Marshal.PtrToStructure(m.LParam, typeof(MINMAXINFO));
-                mmi.ptMinTrackSize = new Point(320, 380);
-                mmi.ptMaxTrackSize = new Point(1200, 1200);
+                mmi.ptMinTrackSize = new Point(260, 240);
+                mmi.ptMaxTrackSize = new Point(1600, 1400);
                 Marshal.StructureToPtr(mmi, m.LParam, true);
                 return;
             }
@@ -405,10 +547,128 @@ namespace PasteImageAsFile
         {
             base.OnResize(e);
             LayoutControls();
-            if (this.WindowState == FormWindowState.Normal && this.Width >= 320 && this.Height >= 380)
+        }
+
+        private void UpdateSubBarLayout()
+        {
+            if (pnlSubBar == null) return;
+
+            int w = this.ClientSize.Width;
+            bool isClipboard = (currentMainTab == 0);
+            bool isCompact = (w < 330);
+
+            pnlSubBar.Location = new Point(0, 64);
+            pnlSubBar.Width = w;
+
+            if (isClipboard)
             {
-                Config.ClipboardFlyoutWidth = this.Width;
-                Config.ClipboardFlyoutHeight = this.Height;
+                // Подвкладки фильтрации
+                int subX = isCompact ? 10 : 12;
+                int gap = isCompact ? 4 : 6;
+                int[] widths = isCompact ? new int[] { 36, 60, 46, 52 } : new int[] { 38, 62, 48, 54 };
+                float fontSize = isCompact ? 8.2f : 8.5f;
+
+                for (int i = 0; i < filterButtons.Count; i++)
+                {
+                    filterButtons[i].Visible = true;
+                    filterButtons[i].Padding = new Padding(0);
+                    filterButtons[i].Font = new Font("Segoe UI", fontSize, (i == currentFilterIndex) ? FontStyle.Bold : FontStyle.Regular);
+                    filterButtons[i].Size = new Size(widths[i], 24);
+                    filterButtons[i].Location = new Point(subX, 3);
+                    subX += widths[i] + gap;
+                }
+
+                if (btnDragMode != null) btnDragMode.Visible = false;
+                if (btnAddNote != null) btnAddNote.Visible = false;
+
+                // Кнопка очистки
+                if (btnClearAll != null)
+                {
+                    btnClearAll.Visible = true;
+                    if (isConfirmingClear)
+                    {
+                        btnClearAll.Text = isCompact ? "❓" : "Точно?";
+                        btnClearAll.Width = isCompact ? 30 : 56;
+                        btnClearAll.Font = isCompact ? new Font("Segoe UI Emoji", 9f) : new Font("Segoe UI", 8f);
+                        btnClearAll.BackColor = Color.FromArgb(196, 43, 28);
+                        btnClearAll.ForeColor = Color.White;
+                    }
+                    else
+                    {
+                        btnClearAll.BackColor = ThemeHelper.CardBackground;
+                        btnClearAll.ForeColor = ThemeHelper.TextSecondary;
+                        if (isCompact)
+                        {
+                            btnClearAll.Text = "🗑";
+                            btnClearAll.Width = 26;
+                            btnClearAll.Font = new Font("Segoe UI Emoji", 9f);
+                        }
+                        else
+                        {
+                            btnClearAll.Text = "Очистить";
+                            btnClearAll.Width = 74;
+                            btnClearAll.Font = new Font("Segoe UI", 8f);
+                        }
+                    }
+                    toolTip.SetToolTip(btnClearAll, isConfirmingClear ? "Подтвердите очистку журнала" : "Очистить историю буфера обмена");
+                    btnClearAll.Location = new Point(w - btnClearAll.Width - (isCompact ? 10 : 12), 3);
+                }
+            }
+            else
+            {
+                // SuperHub: скрываем подвкладки
+                for (int i = 0; i < filterButtons.Count; i++)
+                {
+                    filterButtons[i].Visible = false;
+                }
+
+                if (btnDragMode != null)
+                {
+                    bool isCopy = string.Equals(Config.SuperHubDragMode, "Copy", StringComparison.OrdinalIgnoreCase);
+                    btnDragMode.Visible = true;
+                    btnDragMode.Width = isCompact ? 60 : 72;
+                    btnDragMode.Font = new Font("Segoe UI", isCompact ? 7.5f : 8f, FontStyle.Bold);
+                    btnDragMode.Text = isCopy ? "Копия" : "Перенос";
+                    btnDragMode.Location = new Point(isCompact ? 10 : 12, 3);
+                }
+
+                if (btnAddNote != null)
+                {
+                    btnAddNote.Visible = true;
+                    int left = (btnDragMode != null && btnDragMode.Visible) ? (btnDragMode.Right + 6) : (isCompact ? 10 : 12);
+                    btnAddNote.Width = isCompact ? 68 : 80;
+                    btnAddNote.Font = new Font("Segoe UI", isCompact ? 7.5f : 8f);
+                    btnAddNote.Text = isCompact ? "+ Текст" : "+ Заметка";
+                    btnAddNote.Location = new Point(left, 3);
+                }
+
+                if (btnClearAll != null)
+                {
+                    btnClearAll.Visible = true;
+                    if (isConfirmingClear)
+                    {
+                        btnClearAll.Text = isCompact ? "❓" : "Точно?";
+                        btnClearAll.Width = isCompact ? 32 : (w >= 380 ? 64 : 54);
+                        btnClearAll.Font = isCompact ? new Font("Segoe UI Emoji", 9f) : new Font("Segoe UI", 8f);
+                    }
+                    else
+                    {
+                        if (isCompact)
+                        {
+                            btnClearAll.Text = "🗑";
+                            btnClearAll.Width = 26;
+                            btnClearAll.Font = new Font("Segoe UI Emoji", 9f);
+                        }
+                        else
+                        {
+                            btnClearAll.Text = (w >= 380) ? "Очистить полку" : "Очистить";
+                            btnClearAll.Width = (w >= 380) ? 106 : 74;
+                            btnClearAll.Font = new Font("Segoe UI", 8f);
+                        }
+                    }
+                    toolTip.SetToolTip(btnClearAll, isConfirmingClear ? "Подтвердите очистку полки" : "Очистить файлы полки SuperHub");
+                    btnClearAll.Location = new Point(w - btnClearAll.Width - (isCompact ? 10 : 12), 3);
+                }
             }
         }
 
@@ -441,90 +701,43 @@ namespace PasteImageAsFile
             {
                 pnlMainTabs.Location = new Point(0, 30);
                 pnlMainTabs.Width = w;
-                int tabMargin = 12;
-                int tabGap = 8;
-                int tabW = Math.Max(100, (w - tabMargin * 2 - tabGap) / 2);
+                int tabMargin = (w < 300) ? 8 : 12;
+                int tabGap = (w < 300) ? 6 : 8;
+                int tabW = Math.Max(70, (w - tabMargin * 2 - tabGap) / 2);
                 if (btnMainClipboard != null)
                 {
+                    btnMainClipboard.Font = new Font("Segoe UI Semibold", (w < 300) ? 8.5f : 9.5f, (currentMainTab == 0) ? FontStyle.Bold : FontStyle.Regular);
                     btnMainClipboard.Location = new Point(tabMargin, 2);
                     btnMainClipboard.Size = new Size(tabW, 28);
                 }
                 if (btnMainSuperHub != null)
                 {
+                    btnMainSuperHub.Font = new Font("Segoe UI Semibold", (w < 300) ? 8.5f : 9.5f, (currentMainTab == 1) ? FontStyle.Bold : FontStyle.Regular);
                     btnMainSuperHub.Location = new Point(tabMargin + tabW + tabGap, 2);
                     btnMainSuperHub.Size = new Size(tabW, 28);
                 }
             }
 
+            UpdateSubBarLayout();
+
             bool isClipboard = (currentMainTab == 0);
-
-            if (pnlSubBar != null)
-            {
-                pnlSubBar.Location = new Point(0, 64);
-                pnlSubBar.Width = w;
-
-                if (isClipboard)
-                {
-                    // Подвкладки фильтрации
-                    int subX = 12;
-                    for (int i = 0; i < filterButtons.Count; i++)
-                    {
-                        filterButtons[i].Visible = true;
-                        filterButtons[i].Location = new Point(subX, 3);
-                        subX += filterButtons[i].Width + 6;
-                    }
-
-                    if (btnDragMode != null) btnDragMode.Visible = false;
-
-                    // Кнопка очистить
-                    if (btnClearAll != null)
-                    {
-                        btnClearAll.Width = 74;
-                        btnClearAll.Text = "Очистить";
-                        btnClearAll.Location = new Point(w - btnClearAll.Width - 12, 3);
-                    }
-                }
-                else
-                {
-                    // SuperHub: подвкладок нет
-                    for (int i = 0; i < filterButtons.Count; i++)
-                    {
-                        filterButtons[i].Visible = false;
-                    }
-
-                    if (btnDragMode != null)
-                    {
-                        bool isCopy = string.Equals(Config.SuperHubDragMode, "Copy", StringComparison.OrdinalIgnoreCase);
-                        btnDragMode.Visible = true;
-                        btnDragMode.Width = 72;
-                        btnDragMode.Text = isCopy ? "Копия" : "Перенос";
-                        btnDragMode.Location = new Point(12, 3);
-                    }
-
-                    if (btnClearAll != null)
-                    {
-                        btnClearAll.Width = (w < 380) ? 76 : 106;
-                        btnClearAll.Text = (w < 380) ? "Очистить" : "Очистить полку";
-                        btnClearAll.Location = new Point(w - btnClearAll.Width - 12, 3);
-                    }
-                }
-            }
-
             int thirdY = 96;
+            int margin = (w < 300) ? 8 : 12;
+
             if (pnlSearch != null)
             {
                 pnlSearch.Visible = isClipboard;
                 if (pnlSearch.Visible)
                 {
-                    pnlSearch.Location = new Point(12, thirdY);
-                    pnlSearch.Width = Math.Max(100, w - 24);
+                    pnlSearch.Location = new Point(margin, thirdY);
+                    pnlSearch.Width = Math.Max(100, w - margin * 2);
                     if (searchBoxBg != null)
                     {
                         searchBoxBg.Width = pnlSearch.Width;
                     }
                     if (txtSearch != null && searchBoxBg != null)
                     {
-                        txtSearch.Width = Math.Max(100, searchBoxBg.ClientSize.Width - 36);
+                        txtSearch.Width = Math.Max(60, searchBoxBg.ClientSize.Width - 36);
                     }
                 }
             }
@@ -534,8 +747,8 @@ namespace PasteImageAsFile
                 pnlDropHint.Visible = !isClipboard;
                 if (pnlDropHint.Visible)
                 {
-                    pnlDropHint.Location = new Point(12, thirdY);
-                    pnlDropHint.Size = new Size(Math.Max(100, w - 24), 30);
+                    pnlDropHint.Location = new Point(margin, thirdY);
+                    pnlDropHint.Size = new Size(Math.Max(100, w - margin * 2), 30);
                 }
             }
 
@@ -544,12 +757,14 @@ namespace PasteImageAsFile
             {
                 pnlViewport.Location = new Point(0, contentTop);
                 pnlViewport.Size = new Size(w, Math.Max(50, h - contentTop - 4));
-                if (cardsContainer != null)
-                {
-                    int cardW = Math.Max(100, pnlViewport.ClientSize.Width - 24);
-                    cardsContainer.Location = new Point(12, cardsContainer.Top);
-                    cardsContainer.Width = cardW;
-                    foreach (Control c in cardsContainer.Controls)
+                int cardMargin = (w < 300) ? 8 : 12;
+                int cardW = Math.Max(100, pnlViewport.ClientSize.Width - cardMargin * 2);
+
+                Action<Panel> updateContainerLayout = (pnl) => {
+                    if (pnl == null) return;
+                    pnl.Location = new Point(cardMargin, pnl.Top);
+                    pnl.Width = cardW;
+                    foreach (Control c in pnl.Controls)
                     {
                         if (!(c is Panel)) continue;
                         c.Width = cardW;
@@ -559,20 +774,28 @@ namespace PasteImageAsFile
                             if (sub is Button)
                             {
                                 string tag = sub.Tag != null ? sub.Tag.ToString() : "";
-                                if (tag == "c1_r1") { sub.Left = cardW - 62; sub.Top = 6; }
-                                else if (tag == "c2_r1") { sub.Left = cardW - 32; sub.Top = 6; }
-                                else if (tag == "c1_r2") { sub.Left = cardW - 62; sub.Top = 36; }
-                                else if (tag == "c2_r2") { sub.Left = cardW - 32; sub.Top = 36; }
-                                else if (tag == "hub_view") { sub.Left = cardW - 62; sub.Top = (c.Height - sub.Height) / 2; }
-                                else if (tag == "hub_remove") { sub.Left = cardW - 32; sub.Top = (c.Height - sub.Height) / 2; }
+                                if (tag == "c1_r1") { sub.Left = cardW - 60; sub.Top = 6; }
+                                else if (tag == "c2_r1") { sub.Left = cardW - 30; sub.Top = 6; }
+                                else if (tag == "c1_r2") { sub.Left = cardW - 60; sub.Top = 36; }
+                                else if (tag == "c2_r2") { sub.Left = cardW - 30; sub.Top = 36; }
+                                else if (tag == "hub_view") { sub.Left = cardW - 60; sub.Top = (c.Height - sub.Height) / 2; }
+                                else if (tag == "hub_remove") { sub.Left = cardW - 30; sub.Top = (c.Height - sub.Height) / 2; }
                             }
                             else if (sub is Label)
                             {
-                                sub.Width = Math.Max(30, cardW - sub.Left - 70);
+                                sub.Width = Math.Max(30, cardW - sub.Left - 68);
                             }
                         }
                     }
+                };
+
+                if (cardW != lastLayoutCardWidth)
+                {
+                    lastLayoutCardWidth = cardW;
+                    updateContainerLayout(cardsContainerClipboard);
+                    updateContainerLayout(cardsContainerSuperHub);
                 }
+                UpdateContainerScroll();
             }
 
             this.ResumeLayout(true);
@@ -604,7 +827,7 @@ namespace PasteImageAsFile
 
             lblAppHeader = new Label
             {
-                Text = "Буфер обмена",
+                Text = "PasteImageAsFile",
                 Font = new Font("Segoe UI", 8.5f),
                 ForeColor = Color.FromArgb(160, 160, 160),
                 AutoSize = true,
@@ -704,8 +927,8 @@ namespace PasteImageAsFile
                 TabStop = false
             };
             btnMainClipboard.FlatAppearance.BorderSize = 0;
-            btnMainClipboard.FlatAppearance.MouseOverBackColor = Color.FromArgb(35, 255, 255, 255);
-            btnMainClipboard.FlatAppearance.MouseDownBackColor = Color.FromArgb(60, 255, 255, 255);
+            btnMainClipboard.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+            btnMainClipboard.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
             btnMainClipboard.Click += (s, e) => SwitchMainTab(0);
             pnlMainTabs.Controls.Add(btnMainClipboard);
 
@@ -723,8 +946,8 @@ namespace PasteImageAsFile
                 TabStop = false
             };
             btnMainSuperHub.FlatAppearance.BorderSize = 0;
-            btnMainSuperHub.FlatAppearance.MouseOverBackColor = Color.FromArgb(35, 255, 255, 255);
-            btnMainSuperHub.FlatAppearance.MouseDownBackColor = Color.FromArgb(60, 255, 255, 255);
+            btnMainSuperHub.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+            btnMainSuperHub.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
             btnMainSuperHub.Click += (s, e) => SwitchMainTab(1);
             pnlMainTabs.Controls.Add(btnMainSuperHub);
 
@@ -804,6 +1027,35 @@ namespace PasteImageAsFile
             };
             pnlSubBar.Controls.Add(btnDragMode);
 
+            // Кнопка создания текстовой заметки в SuperHub [+ Заметка]
+            btnAddNote = new Button
+            {
+                Text = "+ Заметка",
+                Location = new Point(88, 3),
+                Size = new Size(80, 24),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = ThemeHelper.CardBackground,
+                ForeColor = ThemeHelper.TextPrimary,
+                Font = new Font("Segoe UI", 8f),
+                Cursor = Cursors.Hand,
+                Visible = false,
+                TabStop = false
+            };
+            btnAddNote.FlatAppearance.BorderSize = 0;
+            btnAddNote.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+            btnAddNote.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
+            btnAddNote.MouseEnter += (s, e) => {
+                btnAddNote.ForeColor = ThemeHelper.Accent;
+                btnAddNote.BackColor = ThemeHelper.CardHover;
+            };
+            btnAddNote.MouseLeave += (s, e) => {
+                btnAddNote.ForeColor = ThemeHelper.TextPrimary;
+                btnAddNote.BackColor = ThemeHelper.CardBackground;
+            };
+            btnAddNote.Click += (s, e) => OpenNewNoteDialog();
+            toolTip.SetToolTip(btnAddNote, "Создать текстовую заметку в SuperHub (Ctrl+N)");
+            pnlSubBar.Controls.Add(btnAddNote);
+
             // Кнопка очистки
             btnClearAll = new Button
             {
@@ -820,25 +1072,53 @@ namespace PasteImageAsFile
             btnClearAll.FlatAppearance.BorderSize = 0;
             btnClearAll.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
             btnClearAll.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
-            btnClearAll.MouseEnter += (s, e) => btnClearAll.BackColor = ThemeHelper.ButtonHover;
-            btnClearAll.MouseLeave += (s, e) => btnClearAll.BackColor = ThemeHelper.CardBackground;
+            Action resetClearButton = () => {
+                isConfirmingClear = false;
+                if (clearConfirmTimer != null) clearConfirmTimer.Stop();
+                btnClearAll.BackColor = ThemeHelper.CardBackground;
+                btnClearAll.ForeColor = ThemeHelper.TextPrimary;
+                UpdateSubBarLayout();
+            };
+
+            btnClearAll.MouseEnter += (s, e) => {
+                if (!isConfirmingClear) btnClearAll.BackColor = ThemeHelper.ButtonHover;
+            };
+            btnClearAll.MouseLeave += (s, e) => {
+                if (!isConfirmingClear) btnClearAll.BackColor = ThemeHelper.CardBackground;
+            };
             btnClearAll.Click += (s, e) => {
-                bool isHub = (currentMainTab == 1);
-                string msg = isHub
-                    ? "Очистить все файлы на полке SuperHub?"
-                    : "Очистить все незакрепленные элементы буфера?";
-                if (MessageBox.Show(msg, isHub ? "SuperHub" : "Буфер обмена", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                if (!isConfirmingClear)
                 {
-                    ClipboardItemType? filter = null;
+                    isConfirmingClear = true;
+                    btnClearAll.BackColor = Color.FromArgb(196, 43, 28);
+                    btnClearAll.ForeColor = Color.White;
+                    UpdateSubBarLayout();
+                    if (clearConfirmTimer == null)
+                    {
+                        clearConfirmTimer = new System.Windows.Forms.Timer();
+                        clearConfirmTimer.Interval = 3000;
+                        clearConfirmTimer.Tick += (ts, te) => resetClearButton();
+                    }
+                    clearConfirmTimer.Stop();
+                    clearConfirmTimer.Start();
+                    return;
+                }
+
+                resetClearButton();
+
+                bool isHub = (currentMainTab == 1);
+                ClipboardItemType? filter = null;
+                if (!isHub)
+                {
                     if (currentFilterIndex == 1) filter = ClipboardItemType.Image;
                     else if (currentFilterIndex == 2) filter = ClipboardItemType.Text;
                     else if (currentFilterIndex == 3) filter = ClipboardItemType.Files;
-
-                    ClipboardHistoryManager.Instance.ClearAll(filter, isHub);
-                    RefreshItems();
                 }
+
+                ClipboardHistoryManager.Instance.ClearAll(filter, isHub);
+                RefreshItems();
             };
-            toolTip.SetToolTip(btnClearAll, "Очистить все незакрепленные элементы в текущем списке");
+            toolTip.SetToolTip(btnClearAll, "Нажмите для очистки незакрепленных элементов (повторный клик подтверждает)");
             pnlSubBar.Controls.Add(btnClearAll);
 
             this.Controls.Add(pnlSubBar);
@@ -934,7 +1214,7 @@ namespace PasteImageAsFile
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI", 9f)
             };
-            txtSearch.TextChanged += (s, e) => RefreshItems();
+            txtSearch.TextChanged += (s, e) => ApplyFilterToClipboardContainer();
             toolTip.SetToolTip(txtSearch, "Поиск по тексту или имени файла в буфере");
             searchBoxBg.Controls.Add(txtSearch);
 
@@ -951,18 +1231,33 @@ namespace PasteImageAsFile
                 AllowDrop = true
             };
 
-            cardsContainer = new Panel
+            cardsContainerClipboard = new Panel
             {
                 Location = new Point(12, 0),
                 Width = pnlViewport.Width - 24,
                 BackColor = Color.Transparent,
-                AutoSize = false
+                AutoSize = false,
+                Visible = true
             };
-            pnlViewport.Controls.Add(cardsContainer);
+            cardsContainerSuperHub = new Panel
+            {
+                Location = new Point(12, 0),
+                Width = pnlViewport.Width - 24,
+                BackColor = Color.Transparent,
+                AutoSize = false,
+                Visible = false
+            };
+            pnlViewport.Controls.Add(cardsContainerClipboard);
+            pnlViewport.Controls.Add(cardsContainerSuperHub);
+            cardsContainer = cardsContainerClipboard;
+
+            RegisterSuperHubDropTarget(pnlViewport);
+            RegisterSuperHubDropTarget(cardsContainerSuperHub);
 
             // Прокрутка колесиком мыши
             pnlViewport.MouseWheel += OnViewportMouseWheel;
-            cardsContainer.MouseWheel += OnViewportMouseWheel;
+            cardsContainerClipboard.MouseWheel += OnViewportMouseWheel;
+            cardsContainerSuperHub.MouseWheel += OnViewportMouseWheel;
 
             // Отрисовка темного Fluent Scrollbar и метки Resize Grip
             pnlViewport.Paint += RenderFluentScrollbar;
@@ -1127,7 +1422,69 @@ namespace PasteImageAsFile
             }
         }
 
+        private void OpenNewNoteDialog()
+        {
+            try
+            {
+                isShowingModalDialog = true;
+                using (var form = new NewNoteForm())
+                {
+                    if (form.ShowDialog(this) == DialogResult.OK)
+                    {
+                        string note = form.NoteText;
+                        if (!string.IsNullOrWhiteSpace(note))
+                        {
+                            ClipboardHistoryManager.Instance.AddCustomSuperHubItem(null, note);
+                            SwitchMainTab(1);
+                            if (cardsContainerSuperHub != null)
+                            {
+                                PopulateContainer(cardsContainerSuperHub, true);
+                                UpdateContainerScroll();
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("OpenNewNoteDialog error: " + ex.Message);
+            }
+            finally
+            {
+                isShowingModalDialog = false;
+            }
+        }
+
+        public void RegisterSuperHubDropTarget(Control c)
+        {
+            if (c == null) return;
+            try
+            {
+                c.AllowDrop = true;
+                c.DragEnter -= OnFormDragEnter;
+                c.DragEnter += OnFormDragEnter;
+                c.DragOver -= OnFormDragOver;
+                c.DragOver += OnFormDragOver;
+                c.DragDrop -= OnFormDragDrop;
+                c.DragDrop += OnFormDragDrop;
+
+                foreach (Control child in c.Controls)
+                {
+                    RegisterSuperHubDropTarget(child);
+                }
+            }
+            catch {}
+        }
+
         private void OnFormDragEnter(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent(DataFormats.UnicodeText))
+            {
+                e.Effect = DragDropEffects.Copy;
+            }
+        }
+
+        private void OnFormDragOver(object sender, DragEventArgs e)
         {
             if (e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent(DataFormats.UnicodeText))
             {
@@ -1137,33 +1494,128 @@ namespace PasteImageAsFile
 
         private void OnFormDragDrop(object sender, DragEventArgs e)
         {
-            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            try
             {
-                string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
-                ClipboardHistoryManager.Instance.AddCustomSuperHubItem(files, null);
-                SwitchMainTab(1); // Переключаемся на SuperHub
+                if (e.Data.GetDataPresent(DataFormats.FileDrop))
+                {
+                    string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
+                    if (files != null && files.Length > 0)
+                    {
+                        ClipboardHistoryManager.Instance.AddCustomSuperHubItem(files, null);
+                        SwitchMainTab(1);
+                        if (cardsContainerSuperHub != null)
+                        {
+                            PopulateContainer(cardsContainerSuperHub, true);
+                            UpdateContainerScroll();
+                        }
+                    }
+                }
+                else if (e.Data.GetDataPresent(DataFormats.UnicodeText))
+                {
+                    string t = (string)e.Data.GetData(DataFormats.UnicodeText);
+                    if (!string.IsNullOrEmpty(t))
+                    {
+                        ClipboardHistoryManager.Instance.AddCustomSuperHubItem(null, t);
+                        SwitchMainTab(1);
+                        if (cardsContainerSuperHub != null)
+                        {
+                            PopulateContainer(cardsContainerSuperHub, true);
+                            UpdateContainerScroll();
+                        }
+                    }
+                }
             }
-            else if (e.Data.GetDataPresent(DataFormats.UnicodeText))
+            catch (Exception ex)
             {
-                string t = (string)e.Data.GetData(DataFormats.UnicodeText);
-                ClipboardHistoryManager.Instance.AddCustomSuperHubItem(null, t);
-                SwitchMainTab(1);
+                Logger.Log("OnFormDragDrop error: " + ex.Message);
             }
         }
 
         public void SwitchMainTab(int mainTab)
         {
+            if (currentMainTab == mainTab && cardsContainer != null && cardsContainer.Controls.Count > 0) return;
             currentMainTab = mainTab;
             UpdateTabsVisual();
-            LayoutControls();
-            RefreshItems();
+
+            bool isHub = (currentMainTab == 1);
+            UpdateSubBarLayout();
+            if (pnlSearch != null) pnlSearch.Visible = !isHub;
+            if (pnlDropHint != null) pnlDropHint.Visible = isHub;
+
+            if (cardsContainerClipboard != null) cardsContainerClipboard.Visible = !isHub;
+            if (cardsContainerSuperHub != null) cardsContainerSuperHub.Visible = isHub;
+            cardsContainer = isHub ? cardsContainerSuperHub : cardsContainerClipboard;
+
+            if (cardsContainer != null)
+            {
+                if (cardsContainer.Controls.Count == 0)
+                {
+                    PopulateContainer(cardsContainer, isHub);
+                }
+                else
+                {
+                    UpdateContainerScroll();
+                }
+            }
         }
 
         public void SwitchFilter(int filterIndex)
         {
             currentFilterIndex = filterIndex;
             UpdateTabsVisual();
-            RefreshItems();
+            ApplyFilterToClipboardContainer();
+        }
+
+        private void ApplyFilterToClipboardContainer()
+        {
+            if (cardsContainerClipboard == null) return;
+            cardsContainerClipboard.SuspendLayout();
+
+            ClipboardItemType? filter = null;
+            if (currentFilterIndex == 1) filter = ClipboardItemType.Image;
+            else if (currentFilterIndex == 2) filter = ClipboardItemType.Text;
+            else if (currentFilterIndex == 3) filter = ClipboardItemType.Files;
+
+            string search = (txtSearch != null) ? txtSearch.Text.Trim() : null;
+
+            int cardY = 4;
+            int cardW = cardsContainerClipboard.Width;
+            int visibleCount = 0;
+
+            foreach (Control c in cardsContainerClipboard.Controls)
+            {
+                ClipboardItem item = c.Tag as ClipboardItem;
+                if (item == null) continue; // Пустое сообщение или служебный контрол
+
+                bool matches = true;
+                if (filter.HasValue && item.Type != filter.Value) matches = false;
+                if (matches && !string.IsNullOrEmpty(search))
+                {
+                    matches = false;
+                    if (item.TextContent != null && item.TextContent.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0) matches = true;
+                    else if (item.SourceApp != null && item.SourceApp.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0) matches = true;
+                    else if (item.FilePaths != null)
+                    {
+                        foreach (var f in item.FilePaths)
+                        {
+                            if (f != null && f.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0) { matches = true; break; }
+                        }
+                    }
+                }
+
+                c.Visible = matches;
+                if (matches)
+                {
+                    c.Location = new Point(0, cardY);
+                    c.Width = cardW;
+                    cardY += c.Height + 8;
+                    visibleCount++;
+                }
+            }
+
+            cardsContainerClipboard.Height = Math.Max(cardY + 10, 100);
+            cardsContainerClipboard.ResumeLayout(true);
+            UpdateContainerScroll();
         }
 
         private void UpdateTabsVisual()
@@ -1174,6 +1626,8 @@ namespace PasteImageAsFile
                 bool active = (currentMainTab == 0);
                 btnMainClipboard.Font = new Font("Segoe UI", 9f, active ? FontStyle.Bold : FontStyle.Regular);
                 btnMainClipboard.ForeColor = active ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary;
+                btnMainClipboard.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+                btnMainClipboard.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
             }
 
             if (btnMainSuperHub != null)
@@ -1184,6 +1638,8 @@ namespace PasteImageAsFile
                 btnMainSuperHub.Text = title;
                 btnMainSuperHub.Font = new Font("Segoe UI", 9f, active ? FontStyle.Bold : FontStyle.Regular);
                 btnMainSuperHub.ForeColor = active ? ThemeHelper.TextPrimary : ThemeHelper.TextSecondary;
+                btnMainSuperHub.FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+                btnMainSuperHub.FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
             }
 
             if (pnlMainTabs != null) pnlMainTabs.Invalidate();
@@ -1195,6 +1651,8 @@ namespace PasteImageAsFile
                 filterButtons[i].BackColor = active ? ThemeHelper.AccentBackground : Color.Transparent;
                 filterButtons[i].ForeColor = active ? ThemeHelper.Accent : ThemeHelper.TextSecondary;
                 filterButtons[i].Font = new Font("Segoe UI", 8f, active ? FontStyle.Bold : FontStyle.Regular);
+                filterButtons[i].FlatAppearance.MouseOverBackColor = ThemeHelper.ButtonHover;
+                filterButtons[i].FlatAppearance.MouseDownBackColor = ThemeHelper.ButtonPressed;
             }
 
             UpdateDragModeButtonVisual();
@@ -1220,12 +1678,12 @@ namespace PasteImageAsFile
             }
         }
 
-        public void RefreshItems()
+        private void PopulateContainer(Panel container, bool isHub)
         {
-            cardsContainer.SuspendLayout();
-            SafeDisposeControls(cardsContainer);
+            if (container == null) return;
+            container.SuspendLayout();
+            SafeDisposeControls(container);
 
-            bool isHub = (currentMainTab == 1);
             ClipboardItemType? filter = null;
             if (!isHub)
             {
@@ -1244,7 +1702,7 @@ namespace PasteImageAsFile
             }
 
             int cardY = 4;
-            int cardW = cardsContainer.Width;
+            int cardW = container.Width;
 
             if (list.Count == 0)
             {
@@ -1259,26 +1717,42 @@ namespace PasteImageAsFile
                     Size = new Size(cardW, 140),
                     Location = new Point(0, 30)
                 };
-                cardsContainer.Controls.Add(empty);
-                cardsContainer.Height = 200;
+                container.Controls.Add(empty);
+                container.Height = 200;
             }
             else
             {
                 foreach (var item in list)
                 {
                     var card = CreateItemCard(item, cardW);
+                    card.Tag = item;
                     card.Location = new Point(0, cardY);
-                    cardsContainer.Controls.Add(card);
+                    container.Controls.Add(card);
+                    if (isHub)
+                    {
+                        RegisterSuperHubDropTarget(card);
+                    }
                     cardY += card.Height + 8;
                 }
-                cardsContainer.Height = cardY + 10;
+                container.Height = cardY + 10;
             }
 
+            container.ResumeLayout(true);
+        }
+
+        public void RefreshItems()
+        {
+            if (cardsContainerClipboard != null) PopulateContainer(cardsContainerClipboard, false);
+            if (cardsContainerSuperHub != null) PopulateContainer(cardsContainerSuperHub, true);
+            UpdateContainerScroll();
+        }
+
+        private void UpdateContainerScroll()
+        {
+            if (cardsContainer == null || pnlViewport == null) return;
             maxScrollY = Math.Max(0, cardsContainer.Height - pnlViewport.Height);
             if (scrollY > maxScrollY) scrollY = maxScrollY;
             cardsContainer.Top = -scrollY;
-
-            cardsContainer.ResumeLayout(true);
             pnlViewport.Invalidate();
         }
 
@@ -1705,14 +2179,22 @@ namespace PasteImageAsFile
                 c.MouseEnter += (s, e) => { card.BackColor = ThemeHelper.CardHover; };
                 c.MouseLeave += (s, e) => { card.BackColor = ThemeHelper.CardBackground; };
 
-                // Одиночный клик: строгое копирование в буфер
-                c.Click += (s, e) => {
+                // Клик мыши: ЛКМ - копирование в буфер, ПКМ - контекстное меню
+                c.MouseClick += (s, e) => {
                     if (c is Button) return;
-                    CopyItem(item);
-                    ShowCopiedNotification();
-                    if (!isWindowPinned)
+                    if (e.Button == MouseButtons.Left)
                     {
-                        CloseFlyout();
+                        CopyItem(item);
+                        ShowCopiedNotification();
+                        if (!isWindowPinned)
+                        {
+                            CloseFlyout();
+                        }
+                    }
+                    else if (e.Button == MouseButtons.Right)
+                    {
+                        ContextMenu cm = CreateCardContextMenu(item);
+                        cm.Show(c, e.Location);
                     }
                 };
 
@@ -1748,12 +2230,6 @@ namespace PasteImageAsFile
 
                 c.MouseUp += (s, e) => {
                     isPotentialDrag = false;
-                    // Правый клик мыши открывает контекстное меню на любом месте карточки
-                    if (e.Button == MouseButtons.Right)
-                    {
-                        ContextMenu cm = CreateCardContextMenu(item);
-                        cm.Show(c, e.Location);
-                    }
                 };
 
                 foreach (Control sub in c.Controls)
@@ -2066,76 +2542,244 @@ namespace PasteImageAsFile
 
         public static void ShowFlyout(Point cursor, IntPtr prevFg)
         {
-            lock (instanceLock)
+            Logger.Log(string.Format("ShowFlyout entered: cursor=({0},{1}), prevFg={2}", cursor.X, cursor.Y, prevFg));
+            try
             {
-                if (currentInstance != null && !currentInstance.IsDisposed)
+                lock (instanceLock)
                 {
-                    bool wasVisible = currentInstance.Visible;
-                    currentInstance.CloseFlyout();
-                    if (wasVisible)
+                    if (currentInstance != null && !currentInstance.IsDisposed)
                     {
-                        return;
+                        bool wasVisible = currentInstance.Visible;
+                        currentInstance.CloseFlyout();
+                        if (wasVisible)
+                        {
+                            Logger.Log("ShowFlyout: toggle closed existing flyout");
+                            return;
+                        }
                     }
-                }
 
-                Screen scr = Screen.FromPoint(cursor);
+                    Screen scr = Screen.FromPoint(cursor);
 
-                // Если предыдущее окно - это панель задач (клик по трею), находим настоящее пользовательское окно
-                if (prevFg == IntPtr.Zero || Program.IsTaskbarOrTrayWindow(prevFg))
-                {
-                    IntPtr realUserWindow = Program.FindLastActiveUserWindow(scr);
-                    if (realUserWindow != IntPtr.Zero)
+                    // Если предыдущее окно - это панель задач (клик по трею), находим настоящее пользовательское окно
+                    if (prevFg == IntPtr.Zero || Program.IsTaskbarOrTrayWindow(prevFg))
                     {
-                        prevFg = realUserWindow;
+                        IntPtr realUserWindow = Program.FindLastActiveUserWindow(scr);
+                        if (realUserWindow != IntPtr.Zero)
+                        {
+                            prevFg = realUserWindow;
+                        }
                     }
-                }
 
-                currentInstance = new ClipboardFlyoutForm(prevFg);
-                currentInstance.RefreshItems();
+                    currentInstance = new ClipboardFlyoutForm(prevFg);
+                    currentInstance.RefreshItems();
 
-                int x = cursor.X - currentInstance.Width / 2;
+                    int x = cursor.X - currentInstance.Width / 2;
 
-                // Учет вертикального положения панели задач
-                int y;
-                if (scr.WorkingArea.Top > scr.Bounds.Top + 10)
-                {
-                    y = scr.WorkingArea.Top + 8;
-                }
-                else if (scr.WorkingArea.Bottom < scr.Bounds.Bottom - 10)
-                {
-                    y = scr.WorkingArea.Bottom - currentInstance.Height - 8;
-                }
-                else
-                {
-                    if (cursor.Y < scr.Bounds.Top + scr.Bounds.Height / 2)
+                    // Учет вертикального положения панели задач
+                    int y;
+                    if (scr.WorkingArea.Top > scr.Bounds.Top + 10)
                     {
                         y = scr.WorkingArea.Top + 8;
                     }
-                    else
+                    else if (scr.WorkingArea.Bottom < scr.Bounds.Bottom - 10)
                     {
                         y = scr.WorkingArea.Bottom - currentInstance.Height - 8;
                     }
+                    else
+                    {
+                        if (cursor.Y < scr.Bounds.Top + scr.Bounds.Height / 2)
+                        {
+                            y = scr.WorkingArea.Top + 8;
+                        }
+                        else
+                        {
+                            y = scr.WorkingArea.Bottom - currentInstance.Height - 8;
+                        }
+                    }
+
+                    // Учет боковой панели задач
+                    if (scr.WorkingArea.Left > scr.Bounds.Left + 10)
+                    {
+                        x = scr.WorkingArea.Left + 8;
+                    }
+                    else if (scr.WorkingArea.Right < scr.Bounds.Right - 10)
+                    {
+                        x = scr.WorkingArea.Right - currentInstance.Width - 8;
+                    }
+                    else
+                    {
+                        if (x < scr.WorkingArea.Left + 8) x = scr.WorkingArea.Left + 8;
+                        if (x + currentInstance.Width > scr.WorkingArea.Right - 8) x = scr.WorkingArea.Right - currentInstance.Width - 8;
+                    }
+
+                    bool isFromBottom = (y > scr.Bounds.Top + scr.Bounds.Height / 2);
+                    currentInstance.AnimateIn(new Point(x, y), isFromBottom);
+
+                    Logger.Log(string.Format("Flyout shown at ({0},{1}) on {2} with prevFg={3}", x, y, scr.DeviceName, prevFg));
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("ShowFlyout EXCEPTION: " + ex.ToString());
+            }
+        }
+
+        public static void ShowDockFlyout(Screen scr, string position, IntPtr prevFg, bool initialSuperHubTab = true, Rectangle markerBounds = default(Rectangle))
+        {
+            Logger.Log(string.Format("ShowDockFlyout entered: position={0}, prevFg={1}", position, prevFg));
+            try
+            {
+                lock (instanceLock)
+                {
+                    if (scr == null) scr = Screen.PrimaryScreen;
+
+                    if (currentInstance != null && !currentInstance.IsDisposed && currentInstance.Visible)
+                    {
+                        if (initialSuperHubTab && currentInstance.currentMainTab != 1)
+                        {
+                            currentInstance.SwitchMainTab(1);
+                        }
+                        currentInstance.BringToFront();
+                        SetForegroundWindow(currentInstance.Handle);
+                        currentInstance.Activate();
+                        return;
+                    }
+
+                    if (prevFg == IntPtr.Zero || Program.IsTaskbarOrTrayWindow(prevFg))
+                    {
+                        IntPtr realUserWindow = Program.FindLastActiveUserWindow(scr);
+                        if (realUserWindow != IntPtr.Zero) prevFg = realUserWindow;
+                    }
+
+                    currentInstance = new ClipboardFlyoutForm(prevFg);
+                    currentInstance.isDockFlyout = true;
+                    currentInstance.currentDockScreen = scr;
+
+                    if (initialSuperHubTab)
+                    {
+                        currentInstance.SwitchMainTab(1);
+                    }
+                    else
+                    {
+                        currentInstance.RefreshItems();
+                    }
+
+                    currentInstance.dockPositionMode = position ?? "";
+
+                    int w = currentInstance.Width;
+                    int h = currentInstance.Height;
+                    Rectangle work = scr.WorkingArea;
+
+                    int markerCenterY;
+                    if (markerBounds != Rectangle.Empty && markerBounds.Height > 0)
+                    {
+                        markerCenterY = markerBounds.Top + markerBounds.Height / 2;
+                    }
+                    else
+                    {
+                        if (position.EndsWith("Top", StringComparison.OrdinalIgnoreCase)) markerCenterY = work.Top + 64;
+                        else if (position.EndsWith("Bottom", StringComparison.OrdinalIgnoreCase)) markerCenterY = work.Bottom - 64;
+                        else markerCenterY = work.Top + work.Height / 2;
+                    }
+                    currentInstance.anchorMarkerCenterY = markerCenterY;
+
+                    int targetX = work.Right - w - 4;
+                    int targetY = markerCenterY - h / 2;
+                    if (targetY < work.Top + 4) targetY = work.Top + 4;
+                    if (targetY + h > work.Bottom - 4) targetY = work.Bottom - h - 4;
+                    Point startPoint = new Point(targetX + 16, targetY);
+
+                    if (string.Equals(position, "CornerBottomRight", StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetX = work.Right - w - 4;
+                        targetY = work.Bottom - h - 4;
+                        startPoint = new Point(targetX + 16, targetY + 16);
+                    }
+                    else if (string.Equals(position, "CornerBottomLeft", StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetX = work.Left + 4;
+                        targetY = work.Bottom - h - 4;
+                        startPoint = new Point(targetX - 16, targetY + 16);
+                    }
+                    else if (string.Equals(position, "CornerTopRight", StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetX = work.Right - w - 4;
+                        targetY = work.Top + 4;
+                        startPoint = new Point(targetX + 16, targetY - 16);
+                    }
+                    else if (string.Equals(position, "CornerTopLeft", StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetX = work.Left + 4;
+                        targetY = work.Top + 4;
+                        startPoint = new Point(targetX - 16, targetY - 16);
+                    }
+                    else if (string.Equals(position, "TopCenter", StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetX = work.Left + (work.Width - w) / 2;
+                        targetY = work.Top + 4;
+                        startPoint = new Point(targetX, targetY - 16);
+                    }
+                    else if (string.Equals(position, "BottomCenter", StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetX = work.Left + (work.Width - w) / 2;
+                        targetY = work.Bottom - h - 4;
+                        startPoint = new Point(targetX, targetY + 16);
+                    }
+                    else if (position.StartsWith("Left", StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetX = work.Left + 4;
+                        startPoint = new Point(targetX - 16, targetY);
+                    }
+                    else // Right (RightCenter, RightTop, RightBottom)
+                    {
+                        targetX = work.Right - w - 4;
+                        startPoint = new Point(targetX + 16, targetY);
+                    }
+
+                    currentInstance.AnimateIn(new Point(targetX, targetY), startPoint);
+                    Logger.Log(string.Format("Dock Flyout shown at ({0},{1}) on {2}", targetX, targetY, scr.DeviceName));
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("ShowDockFlyout EXCEPTION: " + ex.ToString());
+            }
+        }
+
+        private void DragAllFilesOut()
+        {
+            try
+            {
+                var list = ClipboardHistoryManager.Instance.GetItems(null, true);
+                var sc = new System.Collections.Specialized.StringCollection();
+                foreach (var it in list)
+                {
+                    if (it.Type == ClipboardItemType.Files && it.FilePaths != null)
+                    {
+                        foreach (var f in it.FilePaths) if (SafeFileExists(f) || SafeDirectoryExists(f)) sc.Add(f);
+                    }
+                    else if (it.Type == ClipboardItemType.Image && SafeFileExists(it.ImagePath))
+                    {
+                        sc.Add(it.ImagePath);
+                    }
                 }
 
-                // Учет боковой панели задач
-                if (scr.WorkingArea.Left > scr.Bounds.Left + 10)
+                if (sc.Count > 0)
                 {
-                    x = scr.WorkingArea.Left + 8;
-                }
-                else if (scr.WorkingArea.Right < scr.Bounds.Right - 10)
-                {
-                    x = scr.WorkingArea.Right - currentInstance.Width - 8;
-                }
-                else
-                {
-                    if (x < scr.WorkingArea.Left + 8) x = scr.WorkingArea.Left + 8;
-                    if (x + currentInstance.Width > scr.WorkingArea.Right - 8) x = scr.WorkingArea.Right - currentInstance.Width - 8;
-                }
+                    DataObject data = new DataObject();
+                    bool isMove = string.Equals(Config.SuperHubDragMode, "Move", StringComparison.OrdinalIgnoreCase);
+                    byte dropEffectVal = (byte)(isMove ? 2 : 1);
+                    var dropEffectStream = new System.IO.MemoryStream(new byte[] { dropEffectVal, 0, 0, 0 });
+                    data.SetData("Preferred DropEffect", dropEffectStream);
+                    data.SetFileDropList(sc);
 
-                bool isFromBottom = (y > scr.Bounds.Top + scr.Bounds.Height / 2);
-                currentInstance.AnimateIn(new Point(x, y), isFromBottom);
-
-                Logger.Log(string.Format("Flyout shown at ({0},{1}) on {2} with prevFg={3}", x, y, scr.DeviceName, prevFg));
+                    DragDropEffects allowedEffects = isMove ? (DragDropEffects.Move | DragDropEffects.Copy) : DragDropEffects.Copy;
+                    this.DoDragDrop(data, allowedEffects);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("ClipboardFlyoutForm DragAllFilesOut error: " + ex.Message);
             }
         }
     }
