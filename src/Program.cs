@@ -598,6 +598,16 @@ namespace PasteImageAsFile
             InitTray();
             StartWatcher();
 
+            try
+            {
+                SuperHubDockForm.SyncAllDocks();
+                Logger.Log("SuperHub docks initialized and shown in interactive mode");
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("Error showing SuperHubDockForm in interactive mode: " + ex.Message);
+            }
+
             mainForm = new MainForm();
             Logger.Log("Entering Application.Run(mainForm)");
             Application.Run(mainForm);

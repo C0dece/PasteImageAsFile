@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
@@ -48,6 +49,21 @@ namespace PasteImageAsFile
         [DllImport("user32.dll")]
         private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
 
+        [DllImport("user32.dll")]
+        private static extern bool IsIconic(IntPtr hWnd);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+        private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        private const uint SWP_NOSIZE = 0x0001;
+        private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOACTIVATE = 0x0010;
+        private const uint SWP_SHOWWINDOW = 0x0040;
+
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT
         {
@@ -59,6 +75,7 @@ namespace PasteImageAsFile
 
         private const int GWL_STYLE = -16;
         private const int WS_CAPTION = 0x00C00000;
+        private const int WS_MAXIMIZE = 0x01000000;
 
         private const int VK_LBUTTON = 0x01;
 
@@ -193,6 +210,7 @@ namespace PasteImageAsFile
                 CreateParams cp = base.CreateParams;
                 cp.ExStyle |= 0x08000000; // WS_EX_NOACTIVATE - не перехватывает фокус ввода
                 cp.ExStyle |= 0x00000080; // WS_EX_TOOLWINDOW - не виден в Alt+Tab
+                cp.ExStyle |= 0x00000008; // WS_EX_TOPMOST - поверх окон
                 return cp;
             }
         }
@@ -294,33 +312,42 @@ namespace PasteImageAsFile
                 IntPtr fg = GetForegroundWindow();
                 if (fg != IntPtr.Zero)
                 {
+                    // Исключаем окна собственного процесса
+                    uint currentPid = (uint)Process.GetCurrentProcess().Id;
+                    uint fgPid;
+                    GetWindowThreadProcessId(fg, out fgPid);
+                    if (fgPid == currentPid) return false;
+
+                    // Если окно свернуто (минимизировано), оно не является активной игрой
+                    if (IsIconic(fg)) return false;
+
                     var sb = new System.Text.StringBuilder(256);
                     GetClassName(fg, sb, sb.Capacity);
                     string cls = sb.ToString();
-                    if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd")
+                    if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd" ||
+                        cls == "Windows.UI.Core.CoreWindow" || cls == "DV2ControlHost" ||
+                        cls.StartsWith("XamlExplorerHostIslandWindow", StringComparison.OrdinalIgnoreCase))
                     {
                         return false;
                     }
 
-                    // Проверяем, не является ли окно окном нашей утилиты
-                    foreach (Form openForm in Application.OpenForms)
+                    int style = GetWindowLong(fg, GWL_STYLE);
+
+                    // Обычные развернутые окна приложений имеют стиль WS_MAXIMIZE (0x01000000) — они НЕ являются играми!
+                    if ((style & WS_MAXIMIZE) == WS_MAXIMIZE)
                     {
-                        if (openForm.Handle == fg)
-                        {
-                            return false;
-                        }
+                        return false;
                     }
 
                     RECT rc;
                     if (GetWindowRect(fg, out rc))
                     {
                         Screen scr = screen ?? Screen.PrimaryScreen;
-                        // Окно покрывает весь экран
+                        // Окно покрывает весь физический экран монитора
                         if (rc.Left <= scr.Bounds.Left && rc.Top <= scr.Bounds.Top &&
                             rc.Right >= scr.Bounds.Right && rc.Bottom >= scr.Bounds.Bottom)
                         {
-                            int style = GetWindowLong(fg, GWL_STYLE);
-                            // Если у окна отсутствует заголовок WS_CAPTION, это полноэкранная игра или видеоплеер
+                            // Если у окна отсутствует заголовок WS_CAPTION и оно не WS_MAXIMIZE, это настоящая полноэкранная игра
                             if ((style & WS_CAPTION) != WS_CAPTION)
                             {
                                 return true;
@@ -364,16 +391,16 @@ namespace PasteImageAsFile
 
             Point cur = new Point(pt.x, pt.y);
 
-            // Зона срабатывания строго у маркера: границы маркера + небольшой буфер 6px
+            // Зона срабатывания строго у маркера: границы маркера + минимальный буфер 2px
             Rectangle hitArea = this.Bounds;
-            hitArea.Inflate(6, 6);
+            hitArea.Inflate(2, 2);
 
             bool isOverUs = hitArea.Contains(cur);
 
             if (isOverUs)
             {
                 hoverExpandCounter++;
-                if (hoverExpandCounter >= 2) // Дебаунс 100мс (2 тика по 50мс) для предотвращения случайного срабатывания
+                if (hoverExpandCounter >= 1) // Мгновенный отклик при наведении прямо на маркер
                 {
                     hoverExpandCounter = 0;
                     ExpandShelf();
@@ -588,6 +615,7 @@ namespace PasteImageAsFile
             catch {}
 
             this.Visible = true;
+            SetWindowPos(this.Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
             this.BringToFront();
             this.Invalidate();
         }
