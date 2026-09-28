@@ -231,6 +231,8 @@ namespace PasteImageAsFile
 
             this.Shown += (s, e) => {
                 ApplyWindowStyles();
+                LayoutControls();
+                UpdateSubBarLayout();
             };
 
             ThemeHelper.ThemeChanged += () => {
@@ -346,10 +348,17 @@ namespace PasteImageAsFile
                 txtSearch.ForeColor = ThemeHelper.TextPrimary;
             }
 
+            if (btnAddNote != null)
+            {
+                btnAddNote.BackColor = ThemeHelper.CardBackground;
+                btnAddNote.ForeColor = ThemeHelper.TextPrimary;
+            }
+
             if (pnlDropHint != null) pnlDropHint.BackColor = ThemeHelper.CardBackground;
             if (pnlViewport != null) pnlViewport.BackColor = ThemeHelper.Background;
 
             UpdateTabsVisual();
+            UpdateSubBarLayout();
             this.Invalidate();
         }
 
@@ -402,6 +411,7 @@ namespace PasteImageAsFile
             this.BringToFront();
             SetForegroundWindow(this.Handle);
             this.Activate();
+            UpdateSubBarLayout();
 
             if (openAnimTimer != null)
             {
@@ -622,6 +632,8 @@ namespace PasteImageAsFile
                     filterButtons[i].Visible = false;
                 }
 
+                int left = isCompact ? 10 : 12;
+
                 if (btnDragMode != null)
                 {
                     bool isCopy = string.Equals(Config.SuperHubDragMode, "Copy", StringComparison.OrdinalIgnoreCase);
@@ -629,17 +641,19 @@ namespace PasteImageAsFile
                     btnDragMode.Width = isCompact ? 60 : 72;
                     btnDragMode.Font = new Font("Segoe UI", isCompact ? 7.5f : 8f, FontStyle.Bold);
                     btnDragMode.Text = isCopy ? "Копия" : "Перенос";
-                    btnDragMode.Location = new Point(isCompact ? 10 : 12, 3);
+                    btnDragMode.Location = new Point(left, 3);
+                    btnDragMode.BringToFront();
+                    left += btnDragMode.Width + 6;
                 }
 
                 if (btnAddNote != null)
                 {
                     btnAddNote.Visible = true;
-                    int left = (btnDragMode != null && btnDragMode.Visible) ? (btnDragMode.Right + 6) : (isCompact ? 10 : 12);
                     btnAddNote.Width = isCompact ? 68 : 80;
                     btnAddNote.Font = new Font("Segoe UI", isCompact ? 7.5f : 8f);
                     btnAddNote.Text = isCompact ? "+ Текст" : "+ Заметка";
                     btnAddNote.Location = new Point(left, 3);
+                    btnAddNote.BringToFront();
                 }
 
                 if (btnClearAll != null)
@@ -668,6 +682,7 @@ namespace PasteImageAsFile
                     }
                     toolTip.SetToolTip(btnClearAll, isConfirmingClear ? "Подтвердите очистку полки" : "Очистить файлы полки SuperHub");
                     btnClearAll.Location = new Point(w - btnClearAll.Width - (isCompact ? 10 : 12), 3);
+                    btnClearAll.BringToFront();
                 }
             }
         }
@@ -1533,7 +1548,6 @@ namespace PasteImageAsFile
 
         public void SwitchMainTab(int mainTab)
         {
-            if (currentMainTab == mainTab && cardsContainer != null && cardsContainer.Controls.Count > 0) return;
             currentMainTab = mainTab;
             UpdateTabsVisual();
 
@@ -1656,6 +1670,7 @@ namespace PasteImageAsFile
             }
 
             UpdateDragModeButtonVisual();
+            UpdateSubBarLayout();
         }
 
         private static void SafeDisposeControls(Control parent)
@@ -1745,6 +1760,7 @@ namespace PasteImageAsFile
             if (cardsContainerClipboard != null) PopulateContainer(cardsContainerClipboard, false);
             if (cardsContainerSuperHub != null) PopulateContainer(cardsContainerSuperHub, true);
             UpdateContainerScroll();
+            UpdateSubBarLayout();
         }
 
         private void UpdateContainerScroll()
@@ -2613,6 +2629,7 @@ namespace PasteImageAsFile
                     }
 
                     bool isFromBottom = (y > scr.Bounds.Top + scr.Bounds.Height / 2);
+                    currentInstance.UpdateSubBarLayout();
                     currentInstance.AnimateIn(new Point(x, y), isFromBottom);
 
                     Logger.Log(string.Format("Flyout shown at ({0},{1}) on {2} with prevFg={3}", x, y, scr.DeviceName, prevFg));
@@ -2635,10 +2652,11 @@ namespace PasteImageAsFile
 
                     if (currentInstance != null && !currentInstance.IsDisposed && currentInstance.Visible)
                     {
-                        if (initialSuperHubTab && currentInstance.currentMainTab != 1)
+                        if (initialSuperHubTab)
                         {
                             currentInstance.SwitchMainTab(1);
                         }
+                        currentInstance.UpdateSubBarLayout();
                         currentInstance.BringToFront();
                         SetForegroundWindow(currentInstance.Handle);
                         currentInstance.Activate();
@@ -2663,6 +2681,7 @@ namespace PasteImageAsFile
                     {
                         currentInstance.RefreshItems();
                     }
+                    currentInstance.UpdateSubBarLayout();
 
                     currentInstance.dockPositionMode = position ?? "";
 
@@ -2736,6 +2755,7 @@ namespace PasteImageAsFile
                         startPoint = new Point(targetX + 16, targetY);
                     }
 
+                    currentInstance.UpdateSubBarLayout();
                     currentInstance.AnimateIn(new Point(targetX, targetY), startPoint);
                     Logger.Log(string.Format("Dock Flyout shown at ({0},{1}) on {2}", targetX, targetY, scr.DeviceName));
                 }
