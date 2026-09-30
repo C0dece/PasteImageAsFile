@@ -64,47 +64,47 @@ namespace PasteImageAsFile
         // Colors based on current theme
         public static Color Background
         {
-            get { return IsDarkTheme() ? Color.FromArgb(32, 32, 32) : Color.FromArgb(243, 243, 243); }
+            get { return IsDarkTheme() ? Color.FromArgb(14, 22, 34) : Color.FromArgb(243, 244, 246); }
         }
 
         public static Color HeaderBackground
         {
-            get { return IsDarkTheme() ? Color.FromArgb(38, 38, 38) : Color.FromArgb(236, 236, 236); }
+            get { return IsDarkTheme() ? Color.FromArgb(16, 25, 38) : Color.FromArgb(236, 238, 242); }
         }
 
         public static Color CardBackground
         {
-            get { return IsDarkTheme() ? Color.FromArgb(43, 43, 43) : Color.FromArgb(255, 255, 255); }
+            get { return IsDarkTheme() ? Color.FromArgb(19, 30, 43) : Color.FromArgb(255, 255, 255); }
         }
 
         public static Color CardHover
         {
-            get { return IsDarkTheme() ? Color.FromArgb(53, 53, 53) : Color.FromArgb(245, 245, 245); }
+            get { return IsDarkTheme() ? Color.FromArgb(24, 38, 55) : Color.FromArgb(245, 247, 250); }
         }
 
         public static Color CardBorder
         {
-            get { return IsDarkTheme() ? Color.FromArgb(56, 56, 56) : Color.FromArgb(226, 226, 226); }
+            get { return IsDarkTheme() ? Color.FromArgb(30, 45, 64) : Color.FromArgb(222, 226, 232); }
         }
 
         public static Color CardBorderHover
         {
-            get { return IsDarkTheme() ? Color.FromArgb(80, 80, 80) : Color.FromArgb(190, 190, 190); }
+            get { return IsDarkTheme() ? Color.FromArgb(46, 68, 96) : Color.FromArgb(185, 195, 208); }
         }
 
         public static Color TextPrimary
         {
-            get { return IsDarkTheme() ? Color.FromArgb(240, 240, 240) : Color.FromArgb(25, 25, 25); }
+            get { return IsDarkTheme() ? Color.FromArgb(242, 246, 250) : Color.FromArgb(25, 28, 32); }
         }
 
         public static Color TextSecondary
         {
-            get { return IsDarkTheme() ? Color.FromArgb(160, 160, 160) : Color.FromArgb(100, 100, 100); }
+            get { return IsDarkTheme() ? Color.FromArgb(122, 142, 166) : Color.FromArgb(98, 110, 124); }
         }
 
         public static Color TextMuted
         {
-            get { return IsDarkTheme() ? Color.FromArgb(120, 120, 120) : Color.FromArgb(140, 140, 140); }
+            get { return IsDarkTheme() ? Color.FromArgb(86, 106, 128) : Color.FromArgb(140, 148, 158); }
         }
 
         public static Color Accent
@@ -120,7 +120,7 @@ namespace PasteImageAsFile
                     }
                     catch {}
                 }
-                return IsDarkTheme() ? Color.FromArgb(96, 205, 255) : Color.FromArgb(0, 103, 192);
+                return IsDarkTheme() ? Color.FromArgb(0, 162, 237) : Color.FromArgb(0, 120, 215);
             }
         }
 
@@ -133,7 +133,7 @@ namespace PasteImageAsFile
                 {
                     int r = Math.Min(255, baseCol.R + 25);
                     int g = Math.Min(255, baseCol.G + 25);
-                    int b = Math.Min(255, baseCol.B + 25);
+                    int b = Math.Min(255, baseCol.B + 18);
                     return Color.FromArgb(r, g, b);
                 }
                 else
@@ -153,7 +153,7 @@ namespace PasteImageAsFile
                 Color baseCol = Accent;
                 if (IsDarkTheme())
                 {
-                    return Color.FromArgb(Math.Min(80, baseCol.R / 3 + 20), Math.Min(80, baseCol.G / 3 + 20), Math.Min(90, baseCol.B / 3 + 30));
+                    return Color.FromArgb(12, 76, 119);
                 }
                 else
                 {
@@ -167,47 +167,47 @@ namespace PasteImageAsFile
 
         public static Color ScrollBarTrack
         {
-            get { return IsDarkTheme() ? Color.FromArgb(32, 32, 32) : Color.FromArgb(243, 243, 243); }
+            get { return IsDarkTheme() ? Color.FromArgb(14, 22, 34) : Color.FromArgb(243, 244, 246); }
         }
 
         public static Color ScrollBarThumb
         {
-            get { return IsDarkTheme() ? Color.FromArgb(65, 65, 65) : Color.FromArgb(190, 190, 190); }
+            get { return IsDarkTheme() ? Color.FromArgb(45, 62, 85) : Color.FromArgb(190, 195, 202); }
         }
 
         public static Color ScrollBarThumbHover
         {
-            get { return IsDarkTheme() ? Color.FromArgb(90, 90, 90) : Color.FromArgb(160, 160, 160); }
+            get { return IsDarkTheme() ? Color.FromArgb(65, 88, 118) : Color.FromArgb(160, 168, 178); }
         }
 
         public static Color ScrollBarThumbActive
         {
-            get { return IsDarkTheme() ? Color.FromArgb(120, 120, 120) : Color.FromArgb(130, 130, 130); }
+            get { return IsDarkTheme() ? Color.FromArgb(90, 120, 160) : Color.FromArgb(130, 140, 152); }
         }
 
         public static Color BadgeBackground
         {
-            get { return IsDarkTheme() ? Color.FromArgb(50, 50, 50) : Color.FromArgb(232, 232, 232); }
+            get { return IsDarkTheme() ? Color.FromArgb(24, 38, 55) : Color.FromArgb(232, 235, 240); }
         }
 
         public static Color BadgeText
         {
-            get { return IsDarkTheme() ? Color.FromArgb(200, 200, 200) : Color.FromArgb(70, 70, 70); }
+            get { return IsDarkTheme() ? Color.FromArgb(180, 200, 225) : Color.FromArgb(60, 75, 95); }
         }
 
         public static Color Separator
         {
-            get { return IsDarkTheme() ? Color.FromArgb(48, 48, 48) : Color.FromArgb(222, 222, 222); }
+            get { return IsDarkTheme() ? Color.FromArgb(30, 45, 64) : Color.FromArgb(222, 226, 232); }
         }
 
         public static Color ButtonHover
         {
-            get { return IsDarkTheme() ? Color.FromArgb(55, 55, 55) : Color.FromArgb(230, 230, 230); }
+            get { return IsDarkTheme() ? Color.FromArgb(26, 40, 58) : Color.FromArgb(230, 234, 240); }
         }
 
         public static Color ButtonActive
         {
-            get { return IsDarkTheme() ? Color.FromArgb(65, 65, 65) : Color.FromArgb(215, 215, 215); }
+            get { return IsDarkTheme() ? Color.FromArgb(34, 52, 75) : Color.FromArgb(215, 222, 230); }
         }
 
         public static Color ButtonPressed

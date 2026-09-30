@@ -138,40 +138,23 @@ namespace PasteImageAsFile
 
                 if (!Config.SuperHubEnabled) return;
 
-                string mode = Config.SuperHubScreenMode;
                 Screen[] screens = Screen.AllScreens;
-
-                if (string.Equals(mode, "Primary", StringComparison.OrdinalIgnoreCase))
+                foreach (var s in screens)
                 {
-                    var d = new SuperHubDockForm(Screen.PrimaryScreen);
-                    d.Show();
-                    activeDocks.Add(d);
-                }
-                else if (string.Equals(mode, "Specific", StringComparison.OrdinalIgnoreCase))
-                {
-                    string targetDev = Config.SuperHubTargetScreen;
-                    Screen targetScreen = null;
-                    foreach (var s in screens)
-                    {
-                        if (string.Equals(s.DeviceName, targetDev, StringComparison.OrdinalIgnoreCase))
-                        {
-                            targetScreen = s;
-                            break;
-                        }
-                    }
-                    if (targetScreen == null) targetScreen = Screen.PrimaryScreen;
-                    var d = new SuperHubDockForm(targetScreen);
-                    d.Show();
-                    activeDocks.Add(d);
-                }
-                else // "All" - На всех подключенных мониторах
-                {
-                    foreach (var s in screens)
+                    if (Config.IsScreenSelected(s.DeviceName))
                     {
                         var d = new SuperHubDockForm(s);
                         d.Show();
                         activeDocks.Add(d);
                     }
+                }
+
+                // Fallback: если ни один экран не был выбран или экраны изменились
+                if (activeDocks.Count == 0 && screens.Length > 0)
+                {
+                    var d = new SuperHubDockForm(Screen.PrimaryScreen);
+                    d.Show();
+                    activeDocks.Add(d);
                 }
             }
         }
@@ -241,7 +224,14 @@ namespace PasteImageAsFile
             };
 
             this.DragEnter += OnDragEnter;
-            this.DragOver += (s, e) => { e.Effect = DragDropEffects.Copy; };
+            this.DragOver += (s, e) => {
+                if (e.Data != null && e.Data.GetDataPresent("PasteImageAsFile_InternalDrag"))
+                {
+                    e.Effect = DragDropEffects.None;
+                    return;
+                }
+                e.Effect = DragDropEffects.Copy;
+            };
             this.DragDrop += OnDragDrop;
 
             ThemeHelper.ThemeChanged += () => {
@@ -258,14 +248,19 @@ namespace PasteImageAsFile
 
             // Таймер опроса курсора (детекция наведения и перетаскивания файлов к краю)
             pollTimer = new System.Windows.Forms.Timer();
-            pollTimer.Interval = 50;
+            pollTimer.Interval = 75;
             pollTimer.Tick += OnPollTick;
             pollTimer.Start();
         }
 
         private void OnDragEnter(object sender, DragEventArgs e)
         {
-            if (e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent(DataFormats.UnicodeText))
+            if (e.Data != null && e.Data.GetDataPresent("PasteImageAsFile_InternalDrag"))
+            {
+                e.Effect = DragDropEffects.None;
+                return;
+            }
+            if (ImageDropHelper.HasDropData(e.Data))
             {
                 e.Effect = DragDropEffects.Copy;
                 ExpandShelf();
@@ -274,18 +269,14 @@ namespace PasteImageAsFile
 
         private void OnDragDrop(object sender, DragEventArgs e)
         {
+            if (e.Data != null && e.Data.GetDataPresent("PasteImageAsFile_InternalDrag"))
+            {
+                e.Effect = DragDropEffects.None;
+                return;
+            }
             try
             {
-                if (e.Data.GetDataPresent(DataFormats.FileDrop))
-                {
-                    string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
-                    ClipboardHistoryManager.Instance.AddCustomSuperHubItem(files, null);
-                }
-                else if (e.Data.GetDataPresent(DataFormats.UnicodeText))
-                {
-                    string text = (string)e.Data.GetData(DataFormats.UnicodeText);
-                    ClipboardHistoryManager.Instance.AddCustomSuperHubItem(null, text);
-                }
+                ClipboardHistoryManager.Instance.AddFromDataObject(e.Data, true);
                 ExpandShelf();
             }
             catch (Exception ex)
@@ -294,7 +285,41 @@ namespace PasteImageAsFile
             }
         }
 
+        private static readonly uint CurrentPid = (uint)Process.GetCurrentProcess().Id;
+        private static readonly Dictionary<string, FullscreenCacheEntry> fullScreenCache = new Dictionary<string, FullscreenCacheEntry>(StringComparer.OrdinalIgnoreCase);
+        private static readonly object fsLock = new object();
+
+        private struct FullscreenCacheEntry
+        {
+            public bool IsFullscreen;
+            public long ExpiryTicks;
+        }
+
         public static bool IsFullScreenGameOrAppActive(Screen screen)
+        {
+            string scrKey = (screen != null) ? screen.DeviceName : "primary";
+            long now = DateTime.UtcNow.Ticks;
+            lock (fsLock)
+            {
+                FullscreenCacheEntry entry;
+                if (fullScreenCache.TryGetValue(scrKey, out entry))
+                {
+                    if (now < entry.ExpiryTicks) return entry.IsFullscreen;
+                }
+            }
+
+            bool result = CheckIsFullScreen(screen);
+            lock (fsLock)
+            {
+                FullscreenCacheEntry newEntry;
+                newEntry.IsFullscreen = result;
+                newEntry.ExpiryTicks = now + TimeSpan.FromMilliseconds(500).Ticks;
+                fullScreenCache[scrKey] = newEntry;
+            }
+            return result;
+        }
+
+        private static bool CheckIsFullScreen(Screen screen)
         {
             try
             {
@@ -313,10 +338,9 @@ namespace PasteImageAsFile
                 if (fg != IntPtr.Zero)
                 {
                     // Исключаем окна собственного процесса
-                    uint currentPid = (uint)Process.GetCurrentProcess().Id;
                     uint fgPid;
                     GetWindowThreadProcessId(fg, out fgPid);
-                    if (fgPid == currentPid) return false;
+                    if (fgPid == CurrentPid) return false;
 
                     // Если окно свернуто (минимизировано), оно не является активной игрой
                     if (IsIconic(fg)) return false;

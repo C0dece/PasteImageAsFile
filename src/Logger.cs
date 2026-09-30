@@ -18,6 +18,7 @@ namespace PasteImageAsFile
                 using (var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
                 {
                     fs.Write(bytes, 0, bytes.Length);
+                    fs.Flush();
                 }
             }
             catch {}

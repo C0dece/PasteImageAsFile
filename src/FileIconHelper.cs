@@ -61,17 +61,11 @@ namespace PasteImageAsFile
 
             lock (cacheLock)
             {
-                if (cache.ContainsKey(key))
+                Image cached;
+                if (cache.TryGetValue(key, out cached))
                 {
-                    try
-                    {
-                        var cached = cache[key];
-                        if (cached != null) return new Bitmap(cached);
-                    }
-                    catch
-                    {
-                        cache.Remove(key);
-                    }
+                    if (cached != null) return cached;
+                    cache.Remove(key);
                 }
             }
 
@@ -80,17 +74,10 @@ namespace PasteImageAsFile
 
             lock (cacheLock)
             {
-                if (!cache.ContainsKey(key)) cache[key] = img;
+                cache[key] = img;
             }
 
-            try
-            {
-                return new Bitmap(img);
-            }
-            catch
-            {
-                return SystemIcons.Application.ToBitmap();
-            }
+            return img;
         }
 
         private static Image ExtractIcon(string path, bool isDir)

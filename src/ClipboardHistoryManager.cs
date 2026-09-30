@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Text;
 using System.Threading;
+using System.Windows.Forms;
 
 namespace PasteImageAsFile
 {
@@ -34,6 +36,9 @@ namespace PasteImageAsFile
         // Файлы
         public List<string> FilePaths { get; set; }
 
+        // Папка / коллекция SuperHub
+        public string Folder { get; set; }
+
         public ClipboardItem()
         {
             Id = Guid.NewGuid().ToString("N");
@@ -42,6 +47,7 @@ namespace PasteImageAsFile
             SourceApp = "";
             ImagePath = "";
             TextContent = "";
+            Folder = "";
         }
     }
 
@@ -149,7 +155,22 @@ namespace PasteImageAsFile
             catch {}
         }
 
-        public List<ClipboardItem> GetItems(ClipboardItemType? filter = null, bool superHubOnly = false, string search = null)
+        public static bool IsUrl(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+            string t = text.Trim();
+            if (t.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                t.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                t.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase) ||
+                t.StartsWith("file://", StringComparison.OrdinalIgnoreCase) ||
+                (t.StartsWith("www.", StringComparison.OrdinalIgnoreCase) && t.Contains(".")))
+            {
+                return true;
+            }
+            return false;
+        }
+
+        public List<ClipboardItem> GetItems(ClipboardItemType? filter = null, bool superHubOnly = false, string search = null, string folder = null, bool pinnedOnly = false, bool linksOnly = false, bool textOnlyNoLinks = false)
         {
             lock (fileLock)
             {
@@ -159,10 +180,27 @@ namespace PasteImageAsFile
                     if (superHubOnly)
                     {
                         if (!it.IsInSuperHub) continue;
+                        if (!string.IsNullOrEmpty(folder) && !string.Equals(folder, "Все", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string itFolder = string.IsNullOrEmpty(it.Folder) ? "Общее" : it.Folder;
+                            if (!string.Equals(itFolder, folder, StringComparison.OrdinalIgnoreCase)) continue;
+                        }
                     }
                     else
                     {
-                        if (filter.HasValue && it.Type != filter.Value) continue;
+                        if (pinnedOnly && !it.IsPinned) continue;
+                        if (linksOnly)
+                        {
+                            if (it.Type != ClipboardItemType.Text || !IsUrl(it.TextContent)) continue;
+                        }
+                        else if (textOnlyNoLinks)
+                        {
+                            if (it.Type != ClipboardItemType.Text || IsUrl(it.TextContent)) continue;
+                        }
+                        else if (filter.HasValue && it.Type != filter.Value)
+                        {
+                            continue;
+                        }
                     }
 
                     if (!string.IsNullOrEmpty(search))
@@ -191,6 +229,19 @@ namespace PasteImageAsFile
                     return b.Timestamp.CompareTo(a.Timestamp);
                 });
                 return res;
+            }
+        }
+
+        public int GetSuperHubCount()
+        {
+            lock (fileLock)
+            {
+                int count = 0;
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (items[i].IsInSuperHub) count++;
+                }
+                return count;
             }
         }
 
@@ -267,6 +318,9 @@ namespace PasteImageAsFile
         {
             if (fileList == null || fileList.Count == 0) return null;
 
+            string curF = Config.SuperHubCurrentFolder;
+            if (string.IsNullOrEmpty(curF) || string.Equals(curF, "Все", StringComparison.OrdinalIgnoreCase)) curF = "Общее";
+
             lock (fileLock)
             {
                 var item = new ClipboardItem
@@ -275,6 +329,7 @@ namespace PasteImageAsFile
                     FilePaths = new List<string>(fileList),
                     SourceApp = sourceApp ?? "",
                     IsInSuperHub = asSuperHub,
+                    Folder = asSuperHub ? curF : "",
                     Timestamp = DateTime.Now
                 };
 
@@ -287,6 +342,9 @@ namespace PasteImageAsFile
 
         public void AddCustomSuperHubItem(string[] filePaths, string text)
         {
+            string curF = Config.SuperHubCurrentFolder;
+            if (string.IsNullOrEmpty(curF) || string.Equals(curF, "Все", StringComparison.OrdinalIgnoreCase)) curF = "Общее";
+
             lock (fileLock)
             {
                 if (filePaths != null && filePaths.Length > 0)
@@ -294,17 +352,69 @@ namespace PasteImageAsFile
                     // Проверяем, если среди файлов есть картинки
                     foreach (var p in filePaths)
                     {
+                        if (string.IsNullOrEmpty(p)) continue;
+
+                        // Дедупликация: если этот файл/папка уже есть в SuperHub в текущей папке
+                        ClipboardItem existing = null;
+                        for (int ei = 0; ei < items.Count; ei++)
+                        {
+                            var it = items[ei];
+                            if (it.IsInSuperHub)
+                            {
+                                string itFolder = string.IsNullOrEmpty(it.Folder) ? "Общее" : it.Folder;
+                                if (string.Equals(itFolder, curF, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    if (it.Type == ClipboardItemType.Files && it.FilePaths != null && it.FilePaths.Count == 1 && string.Equals(it.FilePaths[0], p, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        existing = it;
+                                        items.RemoveAt(ei);
+                                        break;
+                                    }
+                                    else if (it.Type == ClipboardItemType.Image && string.Equals(it.ImagePath, p, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        existing = it;
+                                        items.RemoveAt(ei);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (existing != null)
+                        {
+                            existing.Timestamp = DateTime.Now;
+                            items.Insert(0, existing);
+                            continue;
+                        }
+
                         if (File.Exists(p))
                         {
-                            string ext = Path.GetExtension(p).ToLowerInvariant();
-                            if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp")
+                            if (ImageDropHelper.IsImageFile(p))
                             {
+                                int w = 0;
+                                int h = 0;
+                                long sz = 0;
+                                try
+                                {
+                                    sz = new FileInfo(p).Length;
+                                    using (var bmp = new Bitmap(p))
+                                    {
+                                        w = bmp.Width;
+                                        h = bmp.Height;
+                                    }
+                                }
+                                catch {}
+
                                 var imgItem = new ClipboardItem
                                 {
                                     Type = ClipboardItemType.Image,
                                     ImagePath = p,
+                                    ImageWidth = w,
+                                    ImageHeight = h,
+                                    FileSizeBytes = sz,
                                     SourceApp = Path.GetFileName(p),
                                     IsInSuperHub = true,
+                                    Folder = curF,
                                     Timestamp = DateTime.Now
                                 };
                                 items.Insert(0, imgItem);
@@ -318,6 +428,7 @@ namespace PasteImageAsFile
                             FilePaths = new List<string> { p },
                             SourceApp = Path.GetFileName(p),
                             IsInSuperHub = true,
+                            Folder = curF,
                             Timestamp = DateTime.Now
                         };
                         items.Insert(0, fileItem);
@@ -325,12 +436,54 @@ namespace PasteImageAsFile
                 }
                 else if (!string.IsNullOrEmpty(text))
                 {
+                    string trimmed = text.Trim().Trim('"', '\'');
+                    if (trimmed.StartsWith("file:///", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try { trimmed = new Uri(trimmed).LocalPath; } catch {}
+                    }
+
+                    if (File.Exists(trimmed) && ImageDropHelper.IsImageFile(trimmed))
+                    {
+                        AddCustomSuperHubItem(new string[] { trimmed }, null);
+                        return;
+                    }
+
+                    string cleanUrl;
+                    if (ImageDropHelper.IsImageUrl(trimmed, out cleanUrl))
+                    {
+                        Image img = ImageDropHelper.DownloadWebImage(cleanUrl);
+                        if (img != null)
+                        {
+                            using (img)
+                            {
+                                AddSuperHubImage(img, null, null);
+                                return;
+                            }
+                        }
+                    }
+
+                    // Дедупликация текста в текущей папке SuperHub
+                    for (int ei = 0; ei < items.Count; ei++)
+                    {
+                        var it = items[ei];
+                        if (it.IsInSuperHub && it.Type == ClipboardItemType.Text)
+                        {
+                            string itFolder = string.IsNullOrEmpty(it.Folder) ? "Общее" : it.Folder;
+                            if (string.Equals(itFolder, curF, StringComparison.OrdinalIgnoreCase) && string.Equals(it.TextContent, text, StringComparison.Ordinal))
+                            {
+                                items.RemoveAt(ei);
+                                break;
+                            }
+                        }
+                    }
+
                     var textItem = new ClipboardItem
                     {
                         Type = ClipboardItemType.Text,
                         TextContent = FixMojibake(text),
                         SourceApp = "SuperHub",
                         IsInSuperHub = true,
+                        Folder = curF,
                         Timestamp = DateTime.Now
                     };
                     items.Insert(0, textItem);
@@ -338,6 +491,110 @@ namespace PasteImageAsFile
 
                 Save();
             }
+        }
+
+        public ClipboardItem AddSuperHubImage(Image img, string sourceName, IDataObject dataObj = null)
+        {
+            if (img == null) return null;
+            try
+            {
+                int w = img.Width;
+                int h = img.Height;
+                string savedPath = ImageDropHelper.SaveImageToCache(img, dataObj, sourceName);
+                if (string.IsNullOrEmpty(savedPath) || !File.Exists(savedPath)) return null;
+
+                long size = 0;
+                try { size = new FileInfo(savedPath).Length; } catch {}
+
+                lock (fileLock)
+                {
+                    string curF = Config.SuperHubCurrentFolder;
+                    if (string.IsNullOrEmpty(curF) || string.Equals(curF, "Все", StringComparison.OrdinalIgnoreCase)) curF = "Общее";
+
+                    var item = new ClipboardItem
+                    {
+                        Type = ClipboardItemType.Image,
+                        ImagePath = savedPath,
+                        ImageWidth = w,
+                        ImageHeight = h,
+                        FileSizeBytes = size,
+                        SourceApp = Path.GetFileName(savedPath),
+                        IsInSuperHub = true,
+                        Folder = curF,
+                        Timestamp = DateTime.Now
+                    };
+
+                    items.Insert(0, item);
+                    TrimHistory();
+                    Save();
+                    return item;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("AddSuperHubImage error: " + ex.Message);
+                return null;
+            }
+        }
+
+        public bool AddFromDataObject(IDataObject data, bool isSuperHub = true)
+        {
+            if (data == null) return false;
+            if (data.GetDataPresent("PasteImageAsFile_InternalDrag")) return false;
+            try
+            {
+                // 1. Приоритет №1: Извлекаем изображение (Bitmap / PNG / DIB / Web URL)
+                Image img = ImageDropHelper.ExtractImage(data);
+                if (img != null)
+                {
+                    using (img)
+                    {
+                        AddSuperHubImage(img, null, data);
+                        return true;
+                    }
+                }
+
+                // 2. Приоритет №2: Файлы (FileDrop)
+                if (data.GetDataPresent(DataFormats.FileDrop))
+                {
+                    string[] files = (string[])data.GetData(DataFormats.FileDrop);
+                    if (files != null && files.Length > 0)
+                    {
+                        AddCustomSuperHubItem(files, null);
+                        return true;
+                    }
+                }
+
+                // 3. Приоритет №3: Текст
+                if (data.GetDataPresent(DataFormats.UnicodeText) || data.GetDataPresent(DataFormats.Text))
+                {
+                    string txt = (data.GetData(DataFormats.UnicodeText) ?? data.GetData(DataFormats.Text)) as string;
+                    if (!string.IsNullOrEmpty(txt) && txt.Trim().Length > 0)
+                    {
+                        string cleanUrl;
+                        if (ImageDropHelper.IsImageUrl(txt, out cleanUrl))
+                        {
+                            Image fallbackImg = ImageDropHelper.DownloadWebImage(cleanUrl);
+                            if (fallbackImg != null)
+                            {
+                                using (fallbackImg)
+                                {
+                                    AddSuperHubImage(fallbackImg, null, data);
+                                    return true;
+                                }
+                            }
+                        }
+
+                        AddCustomSuperHubItem(null, txt);
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("AddFromDataObject error: " + ex.Message);
+            }
+            return false;
         }
 
         public void TogglePin(string id)
@@ -391,13 +648,38 @@ namespace PasteImageAsFile
             }
         }
 
-        public void ClearAll(ClipboardItemType? filter, bool superHubOnly)
+        public void SetItemFolder(string id, string folder)
+        {
+            lock (fileLock)
+            {
+                foreach (var it in items)
+                {
+                    if (it.Id == id)
+                    {
+                        it.Folder = folder ?? "";
+                        Save();
+                        break;
+                    }
+                }
+            }
+        }
+
+        public void ClearAll(ClipboardItemType? filter, bool superHubOnly, string folder = null)
         {
             lock (fileLock)
             {
                 items.RemoveAll(it => {
                     if (it.IsPinned) return false; // Закрепленные не удаляем
-                    if (superHubOnly) return it.IsInSuperHub;
+                    if (superHubOnly)
+                    {
+                        if (!it.IsInSuperHub) return false;
+                        if (!string.IsNullOrEmpty(folder) && !string.Equals(folder, "Все", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string itFolder = string.IsNullOrEmpty(it.Folder) ? "Общее" : it.Folder;
+                            if (!string.Equals(itFolder, folder, StringComparison.OrdinalIgnoreCase)) return false;
+                        }
+                        return true;
+                    }
                     if (filter.HasValue && it.Type != filter.Value) return false;
                     return !it.IsInSuperHub;
                 });
@@ -425,55 +707,97 @@ namespace PasteImageAsFile
             }
         }
 
+        private string pendingJsonToSave = null;
+        private bool isSaving = false;
+        private readonly object saveLock = new object();
+
         public void Save()
         {
             try
             {
                 StringBuilder sb = new StringBuilder();
                 sb.AppendLine("[");
-                for (int i = 0; i < items.Count; i++)
+                lock (fileLock)
                 {
-                    var it = items[i];
-                    sb.AppendLine("  {");
-                    sb.AppendLine("    \"id\": \"" + EscapeJson(it.Id) + "\",");
-                    sb.AppendLine("    \"type\": " + (int)it.Type + ",");
-                    sb.AppendLine("    \"timestamp\": \"" + it.Timestamp.ToString("o") + "\",");
-                    sb.AppendLine("    \"sourceApp\": \"" + EscapeJson(it.SourceApp) + "\",");
-                    sb.AppendLine("    \"isPinned\": " + (it.IsPinned ? "true" : "false") + ",");
-                    sb.AppendLine("    \"isSuperHub\": " + (it.IsInSuperHub ? "true" : "false") + ",");
-                    sb.AppendLine("    \"imagePath\": \"" + EscapeJson(it.ImagePath) + "\",");
-                    sb.AppendLine("    \"imageWidth\": " + it.ImageWidth + ",");
-                    sb.AppendLine("    \"imageHeight\": " + it.ImageHeight + ",");
-                    sb.AppendLine("    \"fileSizeBytes\": " + it.FileSizeBytes + ",");
-                    sb.AppendLine("    \"textContent\": \"" + EscapeJson(it.TextContent) + "\",");
-
-                    sb.Append("    \"filePaths\": [");
-                    if (it.FilePaths != null && it.FilePaths.Count > 0)
+                    for (int i = 0; i < items.Count; i++)
                     {
-                        for (int f = 0; f < it.FilePaths.Count; f++)
-                        {
-                            sb.Append("\"" + EscapeJson(it.FilePaths[f]) + "\"");
-                            if (f < it.FilePaths.Count - 1) sb.Append(", ");
-                        }
-                    }
-                    sb.AppendLine("]");
+                        var it = items[i];
+                        sb.AppendLine("  {");
+                        sb.AppendLine("    \"id\": \"" + EscapeJson(it.Id) + "\",");
+                        sb.AppendLine("    \"type\": " + (int)it.Type + ",");
+                        sb.AppendLine("    \"timestamp\": \"" + it.Timestamp.ToString("o") + "\",");
+                        sb.AppendLine("    \"sourceApp\": \"" + EscapeJson(it.SourceApp) + "\",");
+                        sb.AppendLine("    \"isPinned\": " + (it.IsPinned ? "true" : "false") + ",");
+                        sb.AppendLine("    \"isSuperHub\": " + (it.IsInSuperHub ? "true" : "false") + ",");
+                        sb.AppendLine("    \"imagePath\": \"" + EscapeJson(it.ImagePath) + "\",");
+                        sb.AppendLine("    \"imageWidth\": " + it.ImageWidth + ",");
+                        sb.AppendLine("    \"imageHeight\": " + it.ImageHeight + ",");
+                        sb.AppendLine("    \"fileSizeBytes\": " + it.FileSizeBytes + ",");
+                        sb.AppendLine("    \"textContent\": \"" + EscapeJson(it.TextContent) + "\",");
+                        sb.AppendLine("    \"folder\": \"" + EscapeJson(it.Folder ?? "") + "\",");
 
-                    sb.Append("  }");
-                    if (i < items.Count - 1) sb.Append(",");
-                    sb.AppendLine();
+                        sb.Append("    \"filePaths\": [");
+                        if (it.FilePaths != null && it.FilePaths.Count > 0)
+                        {
+                            for (int f = 0; f < it.FilePaths.Count; f++)
+                            {
+                                sb.Append("\"" + EscapeJson(it.FilePaths[f]) + "\"");
+                                if (f < it.FilePaths.Count - 1) sb.Append(", ");
+                            }
+                        }
+                        sb.AppendLine("]");
+
+                        sb.Append("  }");
+                        if (i < items.Count - 1) sb.Append(",");
+                        sb.AppendLine();
+                    }
                 }
                 sb.AppendLine("]");
 
-                string dir = Path.GetDirectoryName(historyFilePath);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
-
-                string tmp = historyFilePath + ".tmp";
-                File.WriteAllText(tmp, sb.ToString(), Encoding.UTF8);
-                if (File.Exists(historyFilePath)) File.Delete(historyFilePath);
-                File.Move(tmp, historyFilePath);
+                string jsonContent = sb.ToString();
                 NotifyChanged();
+
+                lock (saveLock)
+                {
+                    pendingJsonToSave = jsonContent;
+                    if (!isSaving)
+                    {
+                        isSaving = true;
+                        ThreadPool.QueueUserWorkItem(ProcessSaveQueue);
+                    }
+                }
             }
             catch {}
+        }
+
+        private void ProcessSaveQueue(object state)
+        {
+            while (true)
+            {
+                string toSave = null;
+                lock (saveLock)
+                {
+                    toSave = pendingJsonToSave;
+                    pendingJsonToSave = null;
+                    if (toSave == null)
+                    {
+                        isSaving = false;
+                        return;
+                    }
+                }
+
+                try
+                {
+                    string dir = Path.GetDirectoryName(historyFilePath);
+                    if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+                    string tmp = historyFilePath + ".tmp";
+                    File.WriteAllText(tmp, toSave, Encoding.UTF8);
+                    if (File.Exists(historyFilePath)) File.Delete(historyFilePath);
+                    File.Move(tmp, historyFilePath);
+                }
+                catch {}
+            }
         }
 
         public void Load()
@@ -520,6 +844,7 @@ namespace PasteImageAsFile
                 it.ImageHeight = ExtractJsonInt(chunk, "imageHeight", 0);
                 it.FileSizeBytes = ExtractJsonLong(chunk, "fileSizeBytes", 0);
                 it.TextContent = FixMojibake(ExtractJsonString(chunk, "textContent") ?? "");
+                it.Folder = FixMojibake(ExtractJsonString(chunk, "folder") ?? "");
 
                 int fpIdx = chunk.IndexOf("\"filePaths\":");
                 if (fpIdx >= 0)

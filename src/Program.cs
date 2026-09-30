@@ -120,6 +120,8 @@ namespace PasteImageAsFile
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            ImageDropHelper.EnsureSecurityProtocols();
 
             Application.ThreadException += (s, e) => Logger.Log("ThreadException: " + e.Exception.ToString());
             AppDomain.CurrentDomain.UnhandledException += (s, e) => Logger.Log("UnhandledException: " + e.ExceptionObject.ToString());
@@ -168,6 +170,12 @@ namespace PasteImageAsFile
                     RunDaemonMode();
                     return;
                 }
+                if (cmd == "--screenshot" || cmd == "-shot")
+                {
+                    string targetDir = args.Length > 1 ? args[1] : "";
+                    ClipboardFlyoutForm.GenerateScreenshots(targetDir);
+                    return;
+                }
             }
 
             RunInteractiveMode();
@@ -195,17 +203,18 @@ namespace PasteImageAsFile
             return false;
         }
 
+        public static readonly uint CurrentProcessId = (uint)Process.GetCurrentProcess().Id;
+
         public static IntPtr FindLastActiveUserWindowOnScreen(Screen screen)
         {
             IntPtr found = IntPtr.Zero;
-            uint currentPid = (uint)Process.GetCurrentProcess().Id;
 
             EnumWindows((hwnd, lParam) => {
                 if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return true;
 
                 uint pid;
                 GetWindowThreadProcessId(hwnd, out pid);
-                if (pid == currentPid) return true;
+                if (pid == CurrentProcessId) return true;
 
                 RECT rc;
                 GetWindowRect(hwnd, out rc);
@@ -233,22 +242,57 @@ namespace PasteImageAsFile
             return found;
         }
 
+        public static IntPtr LastKnownUserWindow = IntPtr.Zero;
+
+        public static void RecordActiveUserWindow(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero) return;
+            try
+            {
+                uint pid;
+                GetWindowThreadProcessId(hWnd, out pid);
+                if (pid == CurrentProcessId) return;
+                if (IsTaskbarOrTrayWindow(hWnd)) return;
+                var sb = new System.Text.StringBuilder(128);
+                GetClassName(hWnd, sb, 128);
+                string cls = sb.ToString();
+                if (cls == "Progman" || cls == "WorkerW") return;
+                LastKnownUserWindow = hWnd;
+            }
+            catch {}
+        }
+
         public static IntPtr FindLastActiveUserWindow(Screen preferredScreen = null)
         {
+            if (LastKnownUserWindow != IntPtr.Zero && IsWindowVisible(LastKnownUserWindow) && !IsIconic(LastKnownUserWindow))
+            {
+                uint pid;
+                GetWindowThreadProcessId(LastKnownUserWindow, out pid);
+                if (pid != CurrentProcessId)
+                {
+                    if (preferredScreen == null) return LastKnownUserWindow;
+                    Screen s = Screen.FromHandle(LastKnownUserWindow);
+                    if (s != null && s.DeviceName == preferredScreen.DeviceName) return LastKnownUserWindow;
+                }
+            }
+
             IntPtr found = IntPtr.Zero;
             if (preferredScreen != null)
             {
                 found = FindLastActiveUserWindowOnScreen(preferredScreen);
-                if (found != IntPtr.Zero) return found;
+                if (found != IntPtr.Zero)
+                {
+                    LastKnownUserWindow = found;
+                    return found;
+                }
             }
 
-            uint currentPid = (uint)Process.GetCurrentProcess().Id;
             EnumWindows((hwnd, lParam) => {
                 if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return true;
 
                 uint pid;
                 GetWindowThreadProcessId(hwnd, out pid);
-                if (pid == currentPid) return true;
+                if (pid == CurrentProcessId) return true;
 
                 RECT rc;
                 GetWindowRect(hwnd, out rc);
@@ -267,6 +311,7 @@ namespace PasteImageAsFile
                 return false;
             }, IntPtr.Zero);
 
+            if (found != IntPtr.Zero) LastKnownUserWindow = found;
             return found;
         }
 
@@ -321,6 +366,7 @@ namespace PasteImageAsFile
                     Point pt = new Point(curPt.x, curPt.y);
                     Screen scr = Screen.FromPoint(pt);
                     IntPtr prevFg = GetForegroundWindow();
+                    RecordActiveUserWindow(prevFg);
                     if (prevFg == IntPtr.Zero || IsTaskbarOrTrayWindow(prevFg))
                     {
                         IntPtr userWnd = FindLastActiveUserWindow(scr);
@@ -382,6 +428,7 @@ namespace PasteImageAsFile
                     Point pt = new Point(curPt.x, curPt.y);
                     Screen scr = Screen.FromPoint(pt);
                     IntPtr prevFg = GetForegroundWindow();
+                    RecordActiveUserWindow(prevFg);
                     if (prevFg == IntPtr.Zero || IsTaskbarOrTrayWindow(prevFg))
                     {
                         IntPtr userWnd = FindLastActiveUserWindow(scr);
@@ -697,6 +744,7 @@ namespace PasteImageAsFile
                         Point pt = new Point(curPt.x, curPt.y);
                         Screen scr = Screen.FromPoint(pt);
                         IntPtr prevFg = GetForegroundWindow();
+                        RecordActiveUserWindow(prevFg);
                         if (prevFg == IntPtr.Zero || IsTaskbarOrTrayWindow(prevFg))
                         {
                             IntPtr userWnd = FindLastActiveUserWindow(scr);

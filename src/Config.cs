@@ -134,6 +134,53 @@ namespace PasteImageAsFile
             set { SetString("SuperHubDragMode", value); }
         }
 
+        public static string SuperHubSelectedScreens
+        {
+            get { return GetString("SuperHubSelectedScreens", ""); }
+            set { SetString("SuperHubSelectedScreens", value ?? ""); }
+        }
+
+        public static bool IsScreenSelected(string deviceName)
+        {
+            if (string.IsNullOrEmpty(deviceName)) return false;
+            string mode = SuperHubScreenMode;
+            if (string.Equals(mode, "All", StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(mode, "Primary", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Equals(deviceName, System.Windows.Forms.Screen.PrimaryScreen.DeviceName, StringComparison.OrdinalIgnoreCase);
+            }
+            string selected = SuperHubSelectedScreens;
+            if (string.IsNullOrEmpty(selected))
+            {
+                return string.Equals(deviceName, SuperHubTargetScreen, StringComparison.OrdinalIgnoreCase) ||
+                       string.Equals(deviceName, System.Windows.Forms.Screen.PrimaryScreen.DeviceName, StringComparison.OrdinalIgnoreCase);
+            }
+            string[] parts = selected.Split(new char[] { '|' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var p in parts)
+            {
+                if (string.Equals(p.Trim(), deviceName.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+
+        public static bool SuperHubFoldersEnabled
+        {
+            get { return GetDword("SuperHubFoldersEnabled", 1) == 1; }
+            set { SetDword("SuperHubFoldersEnabled", value ? 1 : 0); }
+        }
+
+        public static string SuperHubFolders
+        {
+            get { return GetString("SuperHubFolders", "Все|Общее|Работа|Проекты"); }
+            set { SetString("SuperHubFolders", value ?? "Все|Общее"); }
+        }
+
+        public static string SuperHubCurrentFolder
+        {
+            get { return GetString("SuperHubCurrentFolder", "Все"); }
+            set { SetString("SuperHubCurrentFolder", value ?? "Все"); }
+        }
+
         public static string ClipboardClickAction
         {
             get { return GetString("ClipboardClickAction", "Paste"); }
@@ -146,16 +193,22 @@ namespace PasteImageAsFile
             set { SetString("AccentColor", value ?? ""); }
         }
 
+        public static int LastActiveFlyoutTab
+        {
+            get { return GetDword("LastActiveFlyoutTab", 0); }
+            set { SetDword("LastActiveFlyoutTab", value); }
+        }
+
         public static int ClipboardFlyoutWidth
         {
-            get { return Math.Max(260, Math.Min(1600, GetDword("ClipboardFlyoutWidth", 360))); }
-            set { SetDword("ClipboardFlyoutWidth", Math.Max(260, Math.Min(1600, value))); }
+            get { return Math.Max(310, Math.Min(1600, GetDword("ClipboardFlyoutWidth", 380))); }
+            set { SetDword("ClipboardFlyoutWidth", Math.Max(310, Math.Min(1600, value))); }
         }
 
         public static int ClipboardFlyoutHeight
         {
-            get { return Math.Max(240, Math.Min(1400, GetDword("ClipboardFlyoutHeight", 480))); }
-            set { SetDword("ClipboardFlyoutHeight", Math.Max(240, Math.Min(1400, value))); }
+            get { return Math.Max(420, Math.Min(1400, GetDword("ClipboardFlyoutHeight", 600))); }
+            set { SetDword("ClipboardFlyoutHeight", Math.Max(420, Math.Min(1400, value))); }
         }
 
         public static int SuperHubSensitivity
