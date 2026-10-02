@@ -628,7 +628,9 @@ namespace PasteImageAsFile
         // Подвал формы
         private Panel pnlFooter;
         private FluentButton btnOpenCache;
+        private FluentButton btnCheckUpdate;
         private FluentButton btnHideToTray;
+        private FluentButton btnCheckUpdateTab;
 
         private System.Windows.Forms.Timer statusTimer;
         private ToolTip toolTip;
@@ -763,9 +765,11 @@ namespace PasteImageAsFile
                 ForeColor = ThemeHelper.TextSecondary,
                 AutoSize = true,
                 Location = new Point(66, 37),
-                Cursor = Cursors.Default
+                Cursor = Cursors.Hand
             };
             lblVersion.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left) DragWindow(); };
+            lblVersion.Click += delegate { CheckForUpdatesUI(); };
+            toolTip.SetToolTip(lblVersion, "Версия " + ShellIntegration.AppVersion + ". Нажмите, чтобы проверить обновления на GitHub");
 
             pnlHeader.Controls.Add(lblAppTitle);
             pnlHeader.Controls.Add(lblVersion);
@@ -1004,7 +1008,7 @@ namespace PasteImageAsFile
                 BackColor = ThemeHelper.Background
             };
 
-            btnOpenCache = CreateButton("Папка кэша", 0, 4, 130, 34);
+            btnOpenCache = CreateButton("Папка кэша", 0, 4, 120, 34);
             btnOpenCache.Click += (s, e) => {
                 string cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ShellIntegration.AppName, "Cache");
                 Directory.CreateDirectory(cache);
@@ -1012,11 +1016,16 @@ namespace PasteImageAsFile
             };
             toolTip.SetToolTip(btnOpenCache, "Открыть папку с сохраненными снимками");
 
-            btnHideToTray = CreateButton("Свернуть в трей", 352, 4, 130, 34);
+            btnCheckUpdate = CreateButton("Проверить обновление", 132, 4, 186, 34);
+            btnCheckUpdate.Click += delegate { CheckForUpdatesUI(); };
+            toolTip.SetToolTip(btnCheckUpdate, "Проверить наличие новой версии на GitHub и обновить утилиту");
+
+            btnHideToTray = CreateButton("Свернуть в трей", 330, 4, 152, 34);
             btnHideToTray.Click += (s, e) => { this.Hide(); };
             toolTip.SetToolTip(btnHideToTray, "Спрятать окно настроек в системный трей");
 
             pnlFooter.Controls.Add(btnOpenCache);
+            pnlFooter.Controls.Add(btnCheckUpdate);
             pnlFooter.Controls.Add(btnHideToTray);
 
             // Добавляем все основные компоненты
@@ -1220,6 +1229,21 @@ namespace PasteImageAsFile
             toolTip.SetToolTip(txtPrefix.InnerTextBox, "Базовое имя файла, если оригинальное имя не удалось распознать (например, Снимок)");
             pnlPageGeneral.Controls.Add(lblPrefix);
             pnlPageGeneral.Controls.Add(txtPrefix);
+
+            top += 34;
+            Label lblUpdates = new Label
+            {
+                Text = "Обновления с GitHub:",
+                Font = new Font("Segoe UI Semibold", 9f),
+                Location = new Point(14, top + 6),
+                AutoSize = true
+            };
+            btnCheckUpdateTab = CreateButton("Проверить обновление", 220, top, 230, 32);
+            btnCheckUpdateTab.Click += delegate { CheckForUpdatesUI(); };
+            toolTip.SetToolTip(btnCheckUpdateTab, "Проверить наличие новой версии на GitHub и обновить утилиту");
+
+            pnlPageGeneral.Controls.Add(lblUpdates);
+            pnlPageGeneral.Controls.Add(btnCheckUpdateTab);
         }
 
         private void BuildClipboardPage()
@@ -1808,6 +1832,8 @@ namespace PasteImageAsFile
             if (btnInstall != null) btnInstall.Invalidate();
             if (btnUninstall != null) btnUninstall.Invalidate();
             if (btnOpenCache != null) btnOpenCache.Invalidate();
+            if (btnCheckUpdate != null) btnCheckUpdate.Invalidate();
+            if (btnCheckUpdateTab != null) btnCheckUpdateTab.Invalidate();
             if (btnHideToTray != null) btnHideToTray.Invalidate();
             if (btnTestSuperHub != null) btnTestSuperHub.Invalidate();
 
@@ -2109,6 +2135,41 @@ namespace PasteImageAsFile
                     MessageBoxIcon.Information
                 );
             }
+        }
+
+        private void CheckForUpdatesUI()
+        {
+            if (btnCheckUpdate != null)
+            {
+                btnCheckUpdate.Enabled = false;
+                btnCheckUpdate.Text = "Проверка...";
+            }
+            if (btnCheckUpdateTab != null)
+            {
+                btnCheckUpdateTab.Enabled = false;
+                btnCheckUpdateTab.Text = "Проверка...";
+            }
+
+            UpdateHelper.CheckForUpdatesAsync(delegate(UpdateReleaseInfo info) {
+                if (btnCheckUpdate != null && !btnCheckUpdate.IsDisposed)
+                {
+                    btnCheckUpdate.Enabled = true;
+                    btnCheckUpdate.Text = "Проверить обновление";
+                }
+                if (btnCheckUpdateTab != null && !btnCheckUpdateTab.IsDisposed)
+                {
+                    btnCheckUpdateTab.Enabled = true;
+                    btnCheckUpdateTab.Text = "Проверить обновление";
+                }
+
+                if (!this.IsDisposed && this.IsHandleCreated)
+                {
+                    using (var dlg = new UpdateDialogForm(info))
+                    {
+                        dlg.ShowDialog(this);
+                    }
+                }
+            });
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)

@@ -202,6 +202,15 @@ namespace PasteImageAsFile
                 return;
             }
 
+            const int WM_DISPLAYCHANGE = 0x007E;
+            const int WM_SETTINGCHANGE = 0x001A;
+
+            if (m.Msg == WM_DISPLAYCHANGE || m.Msg == WM_SETTINGCHANGE)
+            {
+                Logger.Log("Display settings or screen change message received (0x" + m.Msg.ToString("X") + ")");
+                SuperHubDockForm.ScheduleSyncAllDocks(250);
+            }
+
             if (m.Msg == WM_CLIPBOARDUPDATE)
             {
                 // Debounce: подавление повторных событий после нашей же записи в буфер

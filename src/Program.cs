@@ -17,6 +17,41 @@ namespace PasteImageAsFile
         private static NotifyIcon trayIcon;
         private static MainForm mainForm;
 
+        public static SynchronizationContext UiContext;
+
+        public static void PostToUi(Action action)
+        {
+            if (action == null) return;
+            if (UiContext != null)
+            {
+                try
+                {
+                    UiContext.Post(delegate {
+                        try { action(); } catch (Exception ex) { Logger.Log("PostToUi error: " + ex.Message); }
+                    }, null);
+                    return;
+                }
+                catch {}
+            }
+            try
+            {
+                if (mainForm != null && !mainForm.IsDisposed && mainForm.IsHandleCreated)
+                {
+                    mainForm.BeginInvoke(action);
+                    return;
+                }
+            }
+            catch {}
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("PostToUi fallback error: " + ex.Message);
+            }
+        }
+
         [DllImport("user32.dll")]
         static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
@@ -611,6 +646,12 @@ namespace PasteImageAsFile
             InitTray();
             StartWatcher();
 
+            if (SynchronizationContext.Current == null)
+            {
+                SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+            }
+            UiContext = SynchronizationContext.Current;
+
             try
             {
                 SuperHubDockForm.SyncAllDocks();
@@ -644,6 +685,12 @@ namespace PasteImageAsFile
 
             InitTray();
             StartWatcher();
+
+            if (SynchronizationContext.Current == null)
+            {
+                SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+            }
+            UiContext = SynchronizationContext.Current;
 
             try
             {

@@ -109,54 +109,98 @@ namespace PasteImageAsFile
             }
         }
 
+        private static System.Windows.Forms.Timer syncDebounceTimer;
+        private static readonly object syncTimerLock = new object();
+
+        public static void ScheduleSyncAllDocks(int delayMs = 250)
+        {
+            Program.PostToUi(delegate {
+                lock (syncTimerLock)
+                {
+                    if (syncDebounceTimer == null)
+                    {
+                        syncDebounceTimer = new System.Windows.Forms.Timer();
+                        syncDebounceTimer.Tick += delegate(object s, EventArgs e) {
+                            syncDebounceTimer.Stop();
+                            try { SyncAllDocks(); } catch (Exception ex) { Logger.Log("SyncAllDocks error: " + ex.Message); }
+                        };
+                    }
+                    syncDebounceTimer.Stop();
+                    syncDebounceTimer.Interval = Math.Max(50, delayMs);
+                    syncDebounceTimer.Start();
+                }
+            });
+        }
+
         public static void SyncAllDocks()
         {
-            lock (instanceLock)
-            {
-                if (!isDisplayListenerRegistered)
+            Program.PostToUi(delegate {
+                lock (instanceLock)
                 {
-                    try
+                    if (!isDisplayListenerRegistered)
                     {
-                        SystemEvents.DisplaySettingsChanged += (s, e) => {
-                            try { SyncAllDocks(); } catch {}
-                        };
-                        isDisplayListenerRegistered = true;
+                        try
+                        {
+                            SystemEvents.DisplaySettingsChanged += delegate(object s, EventArgs e) {
+                                try { ScheduleSyncAllDocks(300); } catch {}
+                            };
+                            isDisplayListenerRegistered = true;
+                        }
+                        catch {}
                     }
-                    catch {}
-                }
 
-                foreach (var dock in activeDocks)
-                {
-                    try
+                    foreach (var dock in activeDocks)
                     {
-                        dock.Hide();
-                        dock.Dispose();
+                        try
+                        {
+                            dock.Hide();
+                            dock.Dispose();
+                        }
+                        catch {}
                     }
-                    catch {}
-                }
-                activeDocks.Clear();
+                    activeDocks.Clear();
 
-                if (!Config.SuperHubEnabled) return;
+                    if (!Config.SuperHubEnabled) return;
 
-                Screen[] screens = Screen.AllScreens;
-                foreach (var s in screens)
-                {
-                    if (Config.IsScreenSelected(s.DeviceName))
+                    Screen[] screens = Screen.AllScreens;
+                    foreach (var s in screens)
                     {
-                        var d = new SuperHubDockForm(s);
+                        if (Config.IsScreenSelected(s.DeviceName))
+                        {
+                            var d = new SuperHubDockForm(s);
+                            d.Show();
+                            activeDocks.Add(d);
+                        }
+                    }
+
+                    // Fallback: если ни один экран не был выбран или экраны изменились
+                    if (activeDocks.Count == 0 && screens.Length > 0)
+                    {
+                        var d = new SuperHubDockForm(Screen.PrimaryScreen);
                         d.Show();
                         activeDocks.Add(d);
                     }
                 }
+            });
+        }
 
-                // Fallback: если ни один экран не был выбран или экраны изменились
-                if (activeDocks.Count == 0 && screens.Length > 0)
+        public Screen GetRealScreen()
+        {
+            try
+            {
+                if (this.IsHandleCreated && !this.IsDisposed)
                 {
-                    var d = new SuperHubDockForm(Screen.PrimaryScreen);
-                    d.Show();
-                    activeDocks.Add(d);
+                    Screen s = Screen.FromHandle(this.Handle);
+                    if (s != null) return s;
                 }
             }
+            catch {}
+            try
+            {
+                return Screen.FromPoint(new Point(this.Left + this.Width / 2, this.Top + this.Height / 2));
+            }
+            catch {}
+            return Screen.PrimaryScreen;
         }
 
         public static void RepositionAllDocks()
@@ -212,7 +256,7 @@ namespace PasteImageAsFile
             this.BackColor = ThemeHelper.Accent;
             this.Cursor = Cursors.Hand;
 
-            this.Click += (s, e) => ExpandShelf();
+            this.Click += delegate(object s, EventArgs e) { ExpandShelf(true); };
 
             this.MouseEnter += (s, e) => {
                 isMouseHovering = true;
@@ -350,6 +394,8 @@ namespace PasteImageAsFile
                     string cls = sb.ToString();
                     if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd" ||
                         cls == "Windows.UI.Core.CoreWindow" || cls == "DV2ControlHost" ||
+                        cls == "Chrome_WidgetWin_1" || cls == "MozillaWindowClass" || cls == "ApplicationFrameWindow" ||
+                        cls == "CabinetWClass" || cls == "Notepad" ||
                         cls.StartsWith("XamlExplorerHostIslandWindow", StringComparison.OrdinalIgnoreCase))
                     {
                         return false;
@@ -392,6 +438,16 @@ namespace PasteImageAsFile
                 return;
             }
 
+            // Проверяем актуальный физический экран маркера (при смене монитора или разрешения)
+            Screen realScr = GetRealScreen();
+            if (this.AttachedScreen == null || 
+                !string.Equals(this.AttachedScreen.DeviceName, realScr.DeviceName, StringComparison.OrdinalIgnoreCase) ||
+                !realScr.Bounds.Contains(this.Bounds.Location))
+            {
+                this.AttachedScreen = realScr;
+                PositionCollapsed();
+            }
+
             // Автоматическое скрытие и блокировка маркера, если запущена полноэкранная игра
             if (IsFullScreenGameOrAppActive(this.AttachedScreen))
             {
@@ -427,7 +483,7 @@ namespace PasteImageAsFile
                 if (hoverExpandCounter >= 1) // Мгновенный отклик при наведении прямо на маркер
                 {
                     hoverExpandCounter = 0;
-                    ExpandShelf();
+                    ExpandShelf(false);
                 }
             }
             else
@@ -436,13 +492,17 @@ namespace PasteImageAsFile
             }
         }
 
-        public void ExpandShelf(bool animate = true)
+        public void ExpandShelf(bool force = false)
         {
             if (!Config.SuperHubEnabled) return;
-            if (IsFullScreenGameOrAppActive(this.AttachedScreen)) return;
+
+            // Всегда используем актуальный физический экран маркера!
+            Screen scr = GetRealScreen();
+            this.AttachedScreen = scr;
+
+            if (!force && IsFullScreenGameOrAppActive(scr)) return;
             try
             {
-                Screen scr = this.AttachedScreen ?? Screen.FromPoint(Cursor.Position);
                 IntPtr prevFg = Program.FindLastActiveUserWindow(scr);
                 string pos = Config.GetScreenPosition(scr.DeviceName, Config.SuperHubPosition);
                 ClipboardFlyoutForm.ShowDockFlyout(scr, pos, prevFg, true, this.Bounds);

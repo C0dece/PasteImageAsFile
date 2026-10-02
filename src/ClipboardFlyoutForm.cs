@@ -3998,6 +3998,24 @@ namespace PasteImageAsFile
                 {
                     if (scr == null) scr = Screen.PrimaryScreen;
 
+                    // Проверяем, существует ли переданный экран в текущей конфигурации системы
+                    Screen actualScr = scr;
+                    bool screenFound = false;
+                    foreach (var s in Screen.AllScreens)
+                    {
+                        if (string.Equals(s.DeviceName, actualScr.DeviceName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            actualScr = s;
+                            screenFound = true;
+                            break;
+                        }
+                    }
+                    if (!screenFound)
+                    {
+                        actualScr = Screen.FromPoint(Cursor.Position) ?? Screen.PrimaryScreen;
+                    }
+                    scr = actualScr;
+
                     if (currentInstance != null && !currentInstance.IsDisposed && currentInstance.Visible)
                     {
                         if (initialSuperHubTab)
@@ -4033,12 +4051,18 @@ namespace PasteImageAsFile
 
                     currentInstance.dockPositionMode = position ?? "";
 
+                    Rectangle work = scr.WorkingArea;
                     int w = currentInstance.Width;
                     int h = currentInstance.Height;
-                    Rectangle work = scr.WorkingArea;
+
+                    // Защита от превышения размеров экрана при масштабировании или маленьком дисплее
+                    if (w > work.Width - 16) w = Math.Max(280, work.Width - 16);
+                    if (h > work.Height - 16) h = Math.Max(320, work.Height - 16);
+                    currentInstance.Size = new Size(w, h);
 
                     int markerCenterY;
-                    if (markerBounds != Rectangle.Empty && markerBounds.Height > 0)
+                    if (markerBounds != Rectangle.Empty && markerBounds.Height > 0 &&
+                        markerBounds.Top >= work.Top - 100 && markerBounds.Bottom <= work.Bottom + 100)
                     {
                         markerCenterY = markerBounds.Top + markerBounds.Height / 2;
                     }
@@ -4052,54 +4076,67 @@ namespace PasteImageAsFile
 
                     int targetX = work.Right - w - 4;
                     int targetY = markerCenterY - h / 2;
-                    if (targetY < work.Top + 4) targetY = work.Top + 4;
-                    if (targetY + h > work.Bottom - 4) targetY = work.Bottom - h - 4;
-                    Point startPoint = new Point(targetX + 16, targetY);
 
                     if (string.Equals(position, "CornerBottomRight", StringComparison.OrdinalIgnoreCase))
                     {
                         targetX = work.Right - w - 4;
                         targetY = work.Bottom - h - 4;
-                        startPoint = new Point(targetX + 16, targetY + 16);
                     }
                     else if (string.Equals(position, "CornerBottomLeft", StringComparison.OrdinalIgnoreCase))
                     {
                         targetX = work.Left + 4;
                         targetY = work.Bottom - h - 4;
-                        startPoint = new Point(targetX - 16, targetY + 16);
                     }
                     else if (string.Equals(position, "CornerTopRight", StringComparison.OrdinalIgnoreCase))
                     {
                         targetX = work.Right - w - 4;
                         targetY = work.Top + 4;
-                        startPoint = new Point(targetX + 16, targetY - 16);
                     }
                     else if (string.Equals(position, "CornerTopLeft", StringComparison.OrdinalIgnoreCase))
                     {
                         targetX = work.Left + 4;
                         targetY = work.Top + 4;
-                        startPoint = new Point(targetX - 16, targetY - 16);
                     }
                     else if (string.Equals(position, "TopCenter", StringComparison.OrdinalIgnoreCase))
                     {
                         targetX = work.Left + (work.Width - w) / 2;
                         targetY = work.Top + 4;
-                        startPoint = new Point(targetX, targetY - 16);
                     }
                     else if (string.Equals(position, "BottomCenter", StringComparison.OrdinalIgnoreCase))
                     {
                         targetX = work.Left + (work.Width - w) / 2;
                         targetY = work.Bottom - h - 4;
-                        startPoint = new Point(targetX, targetY + 16);
                     }
                     else if (position.StartsWith("Left", StringComparison.OrdinalIgnoreCase))
                     {
                         targetX = work.Left + 4;
-                        startPoint = new Point(targetX - 16, targetY);
                     }
                     else // Right (RightCenter, RightTop, RightBottom)
                     {
                         targetX = work.Right - w - 4;
+                    }
+
+                    // Строгий клампинг координат внутри рабочей области активного экрана
+                    if (targetX + w > work.Right - 4) targetX = work.Right - w - 4;
+                    if (targetX < work.Left + 4) targetX = work.Left + 4;
+                    if (targetY + h > work.Bottom - 4) targetY = work.Bottom - h - 4;
+                    if (targetY < work.Top + 4) targetY = work.Top + 4;
+
+                    Point startPoint;
+                    if (position.StartsWith("Left", StringComparison.OrdinalIgnoreCase))
+                    {
+                        startPoint = new Point(targetX - 16, targetY);
+                    }
+                    else if (string.Equals(position, "TopCenter", StringComparison.OrdinalIgnoreCase))
+                    {
+                        startPoint = new Point(targetX, targetY - 16);
+                    }
+                    else if (string.Equals(position, "BottomCenter", StringComparison.OrdinalIgnoreCase))
+                    {
+                        startPoint = new Point(targetX, targetY + 16);
+                    }
+                    else
+                    {
                         startPoint = new Point(targetX + 16, targetY);
                     }
 
