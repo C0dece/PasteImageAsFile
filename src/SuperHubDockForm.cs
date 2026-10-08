@@ -269,7 +269,7 @@ namespace PasteImageAsFile
 
             this.DragEnter += OnDragEnter;
             this.DragOver += (s, e) => {
-                if (e.Data != null && e.Data.GetDataPresent("PasteImageAsFile_InternalDrag"))
+                if (ClipboardFlyoutForm.IsOurInternalDrag(e.Data))
                 {
                     e.Effect = DragDropEffects.None;
                     return;
@@ -299,7 +299,7 @@ namespace PasteImageAsFile
 
         private void OnDragEnter(object sender, DragEventArgs e)
         {
-            if (e.Data != null && e.Data.GetDataPresent("PasteImageAsFile_InternalDrag"))
+            if (ClipboardFlyoutForm.IsOurInternalDrag(e.Data))
             {
                 e.Effect = DragDropEffects.None;
                 return;
@@ -313,7 +313,7 @@ namespace PasteImageAsFile
 
         private void OnDragDrop(object sender, DragEventArgs e)
         {
-            if (e.Data != null && e.Data.GetDataPresent("PasteImageAsFile_InternalDrag"))
+            if (ClipboardFlyoutForm.IsOurInternalDrag(e.Data))
             {
                 e.Effect = DragDropEffects.None;
                 return;
@@ -468,6 +468,13 @@ namespace PasteImageAsFile
 
             DesktopHelper.POINT pt;
             if (!GetCursorPos(out pt)) return;
+
+            // Во время активного Drag-and-Drop или удерживания ЛКМ не перебиваем фокус и не раскрываем окно
+            if (ClipboardFlyoutForm.IsGlobalDraggingActive || ClipboardFlyoutForm.IsLeftMouseButtonDown())
+            {
+                hoverExpandCounter = 0;
+                return;
+            }
 
             Point cur = new Point(pt.x, pt.y);
 

@@ -540,7 +540,7 @@ namespace PasteImageAsFile
         public bool AddFromDataObject(IDataObject data, bool isSuperHub = true)
         {
             if (data == null) return false;
-            if (data.GetDataPresent("PasteImageAsFile_InternalDrag")) return false;
+            if (ClipboardFlyoutForm.IsOurInternalDrag(data)) return false;
             try
             {
                 // 1. Приоритет №1: Извлекаем изображение (Bitmap / PNG / DIB / Web URL)

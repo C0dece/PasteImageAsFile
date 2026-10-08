@@ -32,6 +32,9 @@ namespace PasteImageAsFile
         [DllImport("user32.dll")]
         static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
+        [DllImport("user32.dll")]
+        static extern short GetAsyncKeyState(int vKey);
+
         const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
         const int DWMWCP_ROUND = 2;
         const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
@@ -220,6 +223,64 @@ namespace PasteImageAsFile
         private int scrollY = 0;
         private int maxScrollY = 0;
         private bool isDraggingScroll = false;
+        public static bool IsLeftMouseButtonDown()
+        {
+            try
+            {
+                return (GetAsyncKeyState(0x01) & 0x8000) != 0;
+            }
+            catch
+            {
+                return (Control.MouseButtons & MouseButtons.Left) == MouseButtons.Left;
+            }
+        }
+
+        public static bool IsGlobalDraggingActive { get; private set; }
+        public static long GlobalDragEndTimeTicks { get; private set; }
+        public static string GlobalDraggingItemId { get; private set; }
+        public static readonly HashSet<string> GlobalDraggingPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        public static bool IsOurInternalDrag(IDataObject data)
+        {
+            if (IsGlobalDraggingActive) return true;
+
+            long now = DateTime.UtcNow.Ticks;
+            if (now - GlobalDragEndTimeTicks < TimeSpan.FromMilliseconds(1500).Ticks)
+            {
+                if (data != null)
+                {
+                    try
+                    {
+                        if (data.GetDataPresent(DataFormats.FileDrop))
+                        {
+                            string[] files = data.GetData(DataFormats.FileDrop) as string[];
+                            if (files != null && files.Length > 0)
+                            {
+                                foreach (var f in files)
+                                {
+                                    if (GlobalDraggingPaths.Contains(f)) return true;
+                                }
+                            }
+                        }
+                    }
+                    catch {}
+                }
+                return true;
+            }
+
+            if (data != null)
+            {
+                try
+                {
+                    if (data.GetDataPresent("PasteImageAsFile_InternalDrag")) return true;
+                    if (data.GetDataPresent("PasteImageAsFile_SourceItemId")) return true;
+                }
+                catch {}
+            }
+
+            return false;
+        }
+
         private bool isDraggingItemOut = false;
         private int dragStartMouseY = 0;
         private int dragStartScrollY = 0;
@@ -293,7 +354,7 @@ namespace PasteImageAsFile
             Logger.Log("Constructor: after ApplyTheme");
 
             this.Deactivate += (s, e) => {
-                if (isWindowPinned || isShowingModalDialog || isDraggingItemOut) return;
+                if (isWindowPinned || isShowingModalDialog || isDraggingItemOut || IsGlobalDraggingActive || IsLeftMouseButtonDown()) return;
 
                 // Если курсор мыши все еще находится над окном (или рядом в пределах 36px),
                 // пользователь кликает по элементам, удаляет карточки, вызывает меню - НЕ закрывать!
@@ -334,7 +395,7 @@ namespace PasteImageAsFile
         private void OnMouseLeaveCheckTick(object sender, EventArgs e)
         {
             if (isWindowPinned || isShowingModalDialog || this.IsDisposed || !this.Visible) return;
-            if (isDraggingScroll || isDraggingItemOut) return;
+            if (isDraggingScroll || isDraggingItemOut || IsGlobalDraggingActive || IsLeftMouseButtonDown()) return;
 
             Rectangle bounds = this.Bounds;
             bounds.Inflate(36, 36);
@@ -2188,7 +2249,7 @@ namespace PasteImageAsFile
 
         private void OnFormDragEnter(object sender, DragEventArgs e)
         {
-            if (isDraggingItemOut || (e.Data != null && e.Data.GetDataPresent("PasteImageAsFile_InternalDrag")))
+            if (isDraggingItemOut || IsOurInternalDrag(e.Data))
             {
                 e.Effect = DragDropEffects.None;
                 return;
@@ -2201,7 +2262,7 @@ namespace PasteImageAsFile
 
         private void OnFormDragOver(object sender, DragEventArgs e)
         {
-            if (isDraggingItemOut || (e.Data != null && e.Data.GetDataPresent("PasteImageAsFile_InternalDrag")))
+            if (isDraggingItemOut || IsOurInternalDrag(e.Data))
             {
                 e.Effect = DragDropEffects.None;
                 return;
@@ -2214,7 +2275,7 @@ namespace PasteImageAsFile
 
         private void OnFormDragDrop(object sender, DragEventArgs e)
         {
-            if (isDraggingItemOut || (e.Data != null && e.Data.GetDataPresent("PasteImageAsFile_InternalDrag")))
+            if (isDraggingItemOut || IsOurInternalDrag(e.Data))
             {
                 e.Effect = DragDropEffects.None;
                 return;
@@ -3318,7 +3379,8 @@ namespace PasteImageAsFile
             card.Controls.Add(btnDelete);
 
             // Обработка кликов, наведения и перетаскивания (Drag-and-Drop)
-            Point dragStartPt = Point.Empty;
+            Point dragStartScreenPt = Point.Empty;
+            Control dragInitiator = null;
             bool isPotentialDrag = false;
             bool wasActuallyDragged = false;
             System.Windows.Forms.Timer cardClickTimer = null;
@@ -3388,7 +3450,8 @@ namespace PasteImageAsFile
                         {
                             isCardDoubleClickOccurred = false;
                             wasActuallyDragged = false;
-                            dragStartPt = e.Location;
+                            dragStartScreenPt = Cursor.Position;
+                            dragInitiator = c;
                             isPotentialDrag = true;
                         }
                     }
@@ -3457,16 +3520,17 @@ namespace PasteImageAsFile
                 };
 
                 c.MouseMove += (s, e) => {
-                    if (isPotentialDrag && e.Button == MouseButtons.Left && !(c is Button))
+                    if (isPotentialDrag && (Control.MouseButtons & MouseButtons.Left) == MouseButtons.Left && !(c is Button))
                     {
-                        int dx = Math.Abs(e.X - dragStartPt.X);
-                        int dy = Math.Abs(e.Y - dragStartPt.Y);
+                        Point curPos = Cursor.Position;
+                        int dx = Math.Abs(curPos.X - dragStartScreenPt.X);
+                        int dy = Math.Abs(curPos.Y - dragStartScreenPt.Y);
                         if (dx >= SystemInformation.DragSize.Width || dy >= SystemInformation.DragSize.Height)
                         {
                             isPotentialDrag = false;
                             wasActuallyDragged = true;
                             if (cardClickTimer != null) { cardClickTimer.Stop(); }
-                            StartDragItem(item, card);
+                            StartDragItem(item, dragInitiator ?? card);
                         }
                     }
                 };
@@ -3712,7 +3776,7 @@ namespace PasteImageAsFile
             try
             {
                 DataObject data = new DataObject();
-                data.SetData("PasteImageAsFile_InternalDrag", true);
+                data.SetData("PasteImageAsFile_InternalDrag", "true");
                 data.SetData("PasteImageAsFile_SourceItemId", item.Id ?? "");
                 bool isMove = string.Equals(Config.SuperHubDragMode, "Move", StringComparison.OrdinalIgnoreCase);
                 bool isLink = string.Equals(Config.SuperHubDragMode, "Link", StringComparison.OrdinalIgnoreCase);
@@ -3729,6 +3793,18 @@ namespace PasteImageAsFile
                 else if (item.Type == ClipboardItemType.Image && SafeFileExists(item.ImagePath))
                 {
                     sourcePaths.Add(item.ImagePath);
+                    try
+                    {
+                        using (var fs = new FileStream(item.ImagePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                        using (var img = Image.FromStream(fs))
+                        {
+                            data.SetImage(new Bitmap(img));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Log("StartDragItem SetImage error: " + ex.Message);
+                    }
                 }
                 else if (item.Type == ClipboardItemType.Text && !string.IsNullOrEmpty(item.TextContent))
                 {
@@ -3759,19 +3835,13 @@ namespace PasteImageAsFile
                     {
                         var sc = new StringCollection();
                         foreach (var lnk in tempLnkFiles) sc.Add(lnk);
-                        var dropStream = new MemoryStream(new byte[] { 1, 0, 0, 0 }); // DROPEFFECT_COPY
-                        data.SetData("Preferred DropEffect", dropStream);
                         data.SetFileDropList(sc);
                     }
                 }
                 else if (sourcePaths.Count > 0)
                 {
-                    // Режим Копия или Перенос
                     var sc = new StringCollection();
                     foreach (var f in sourcePaths) sc.Add(f);
-                    byte dropVal = isMove ? (byte)2 : (byte)1;
-                    var dropStream = new MemoryStream(new byte[] { dropVal, 0, 0, 0 });
-                    data.SetData("Preferred DropEffect", dropStream);
                     data.SetFileDropList(sc);
                 }
 
@@ -3780,21 +3850,55 @@ namespace PasteImageAsFile
                     data.SetText(item.TextContent ?? "");
                 }
 
-                DragDropEffects allowed = DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link;
+                DragDropEffects allowed = DragDropEffects.Copy;
+                if (isMove)
+                {
+                    allowed = DragDropEffects.Move | DragDropEffects.Copy;
+                }
+                else if (isLink)
+                {
+                    allowed = DragDropEffects.Link | DragDropEffects.Copy;
+                }
+
+                IsGlobalDraggingActive = true;
                 isDraggingItemOut = true;
+                GlobalDraggingItemId = item.Id ?? "";
+                GlobalDraggingPaths.Clear();
+                foreach (var p in sourcePaths) GlobalDraggingPaths.Add(p);
+
                 try
                 {
-                    sourceControl.DoDragDrop(data, allowed);
+                    Control initiator = sourceControl ?? this;
+                    initiator.DoDragDrop(data, allowed);
                 }
                 finally
                 {
                     isDraggingItemOut = false;
-                    // Если курсор остался над окном (вернулся обратно), активируем окно, чтобы оно не закрылось
+                    IsGlobalDraggingActive = false;
+                    GlobalDragEndTimeTicks = DateTime.UtcNow.Ticks;
+
                     Rectangle b = this.Bounds;
                     b.Inflate(36, 36);
-                    if (b.Contains(Cursor.Position))
+                    Point cur = Cursor.Position;
+                    if (b.Contains(cur))
                     {
                         this.Activate();
+                    }
+                    else if (!isWindowPinned)
+                    {
+                        // Дроп произошел вне окна (в целевую папку или приложение).
+                        // Мягко закрываем SuperHub через короткую паузу (250 мс), если не зажата ЛКМ.
+                        var closeTimer = new System.Windows.Forms.Timer();
+                        closeTimer.Interval = 250;
+                        closeTimer.Tick += (cs, ce) => {
+                            closeTimer.Stop();
+                            closeTimer.Dispose();
+                            if (!isWindowPinned && !this.Bounds.Contains(Cursor.Position) && !IsLeftMouseButtonDown())
+                            {
+                                CloseFlyout();
+                            }
+                        };
+                        closeTimer.Start();
                     }
                 }
             }
@@ -4183,7 +4287,8 @@ namespace PasteImageAsFile
                 if (sourcePaths.Count > 0)
                 {
                     DataObject data = new DataObject();
-                    data.SetData("PasteImageAsFile_InternalDrag", true);
+                    data.SetData("PasteImageAsFile_InternalDrag", "true");
+                    data.SetData("PasteImageAsFile_SourceItemId", "ALL");
                     bool isMove = string.Equals(Config.SuperHubDragMode, "Move", StringComparison.OrdinalIgnoreCase);
                     bool isLink = string.Equals(Config.SuperHubDragMode, "Link", StringComparison.OrdinalIgnoreCase);
 
@@ -4192,20 +4297,24 @@ namespace PasteImageAsFile
                     {
                         tempLnkFiles = CreateTempShortcuts(sourcePaths);
                         foreach (var lnk in tempLnkFiles) sc.Add(lnk);
-                        var dropStream = new MemoryStream(new byte[] { 1, 0, 0, 0 });
-                        data.SetData("Preferred DropEffect", dropStream);
+                        data.SetFileDropList(sc);
                     }
                     else
                     {
                         foreach (var f in sourcePaths) sc.Add(f);
-                        byte dropVal = isMove ? (byte)2 : (byte)1;
-                        var dropStream = new MemoryStream(new byte[] { dropVal, 0, 0, 0 });
-                        data.SetData("Preferred DropEffect", dropStream);
+                        data.SetFileDropList(sc);
                     }
-                    data.SetFileDropList(sc);
 
-                    DragDropEffects allowedEffects = DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link;
+                    DragDropEffects allowedEffects = DragDropEffects.Copy;
+                    if (isMove) allowedEffects = DragDropEffects.Move | DragDropEffects.Copy;
+                    else if (isLink) allowedEffects = DragDropEffects.Link | DragDropEffects.Copy;
+
+                    IsGlobalDraggingActive = true;
                     isDraggingItemOut = true;
+                    GlobalDraggingItemId = "ALL";
+                    GlobalDraggingPaths.Clear();
+                    foreach (var f in sourcePaths) GlobalDraggingPaths.Add(f);
+
                     try
                     {
                         this.DoDragDrop(data, allowedEffects);
@@ -4213,11 +4322,29 @@ namespace PasteImageAsFile
                     finally
                     {
                         isDraggingItemOut = false;
+                        IsGlobalDraggingActive = false;
+                        GlobalDragEndTimeTicks = DateTime.UtcNow.Ticks;
+
                         Rectangle b = this.Bounds;
                         b.Inflate(36, 36);
-                        if (b.Contains(Cursor.Position))
+                        Point cur = Cursor.Position;
+                        if (b.Contains(cur))
                         {
                             this.Activate();
+                        }
+                        else if (!isWindowPinned)
+                        {
+                            var closeTimer = new System.Windows.Forms.Timer();
+                            closeTimer.Interval = 250;
+                            closeTimer.Tick += (cs, ce) => {
+                                closeTimer.Stop();
+                                closeTimer.Dispose();
+                                if (!isWindowPinned && !this.Bounds.Contains(Cursor.Position) && !IsLeftMouseButtonDown())
+                                {
+                                    CloseFlyout();
+                                }
+                            };
+                            closeTimer.Start();
                         }
                     }
                 }

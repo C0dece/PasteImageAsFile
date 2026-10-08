@@ -101,7 +101,7 @@ namespace PasteImageAsFile
             InitDesktopWatcher();
 
             // Проверяем начальное состояние буфера для меню
-            UpdateMenuStateForClipboard();
+            try { UpdateMenuStateForClipboard(); } catch {}
         }
 
         private void InitDesktopWatcher()
